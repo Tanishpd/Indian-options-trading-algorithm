@@ -1,7 +1,9 @@
 """In-memory paper broker for dry runs and Phase 5 wiring.
 
-Matches the project's conservative execution model: fills at the LIMIT price
-(never better, mirroring fills.py), charges full transaction costs by default
+Matches the project's conservative execution model: an order crosses only if
+the executable side of the book reaches the limit (buys must reach the ask,
+sells the bid — LTP is used only when depth is unavailable), fills at the
+LIMIT price rather than better, charges full transaction costs by default
 (a costless paper record is the fiction docs/05 bans), rejects orders the
 account cannot cash-settle, and tracks per-position entry basis so book-level
 risk checks (risk/book.py) are computable in paper.
@@ -19,6 +21,30 @@ from .base import Broker, OrderResult
 
 
 @dataclass(frozen=True)
+class MarketQuote:
+    """Executable prices for one contract. bid/ask are None when the feed
+    provides no depth, in which case LTP stands in for both sides."""
+    ltp: float
+    bid: float | None = None
+    ask: float | None = None
+
+    @classmethod
+    def coerce(cls, value) -> "MarketQuote":
+        if isinstance(value, cls):
+            return value
+        bid = getattr(value, "bid", None)
+        ask = getattr(value, "ask", None)
+        ltp = getattr(value, "ltp", value)
+        return cls(ltp=float(ltp), bid=bid, ask=ask)
+
+    def executable(self, side: Side) -> float:
+        """Price this side must reach to trade: the ask when buying, the bid
+        when selling; LTP when the book is unavailable."""
+        quoted = self.ask if side is Side.BUY else self.bid
+        return float(quoted) if quoted else self.ltp
+
+
+@dataclass(frozen=True)
 class BookPosition:
     leg: OptionLeg       # side normalized to the sign of net
     net: int             # signed shares: positive long, negative short
@@ -32,25 +58,26 @@ class PaperBroker(Broker):
         self._cash = cash
         self._costs = CostConfig() if costs is None else costs
         self.today: date | None = None  # must be set before trading (STT is date-dependent)
-        self._quotes: dict[tuple, float] = {}
+        self._quotes: dict[tuple, MarketQuote] = {}
         self._net: dict[tuple, int] = {}
         self._avg: dict[tuple, float] = {}
         self._ref_leg: dict[tuple, OptionLeg] = {}
         self._ids = count(1)
         self._authenticated = False
 
-    def set_quote(self, leg: OptionLeg, price: float) -> None:
-        self._quotes[leg.key] = price
+    def set_quote(self, leg: OptionLeg, price) -> None:
+        """`price` may be a float (LTP only) or anything exposing .ltp/.bid/.ask."""
+        self._quotes[leg.key] = MarketQuote.coerce(price)
 
     def set_quotes(self, quotes: dict) -> None:
-        """Bulk update keyed by LegKey — the paper loop feeds live LTPs here."""
-        self._quotes.update(quotes)
+        """Bulk update keyed by LegKey — the paper loop feeds live quotes here."""
+        self._quotes.update({k: MarketQuote.coerce(v) for k, v in quotes.items()})
 
     def authenticate(self) -> None:
         self._authenticated = True
 
     def quote(self, leg: OptionLeg) -> float:
-        return self._quotes[leg.key]
+        return self._quotes[leg.key].ltp
 
     def place_limit_order(self, leg: OptionLeg, limit_price: float, shares: int) -> OrderResult:
         if not self._authenticated:
@@ -59,10 +86,13 @@ class PaperBroker(Broker):
             raise RuntimeError("set PaperBroker.today before trading (costs are date-dependent)")
 
         order_id = str(next(self._ids))
-        market = self._quotes.get(leg.key)
-        if market is None:
+        quote = self._quotes.get(leg.key)
+        if quote is None:
             return OrderResult(order_id=order_id, fill_price=None, reason="no_quote")
-        crossed = market <= limit_price if leg.side is Side.BUY else market >= limit_price
+        executable = quote.executable(leg.side)
+        crossed = (
+            executable <= limit_price if leg.side is Side.BUY else executable >= limit_price
+        )
         if not crossed:
             return OrderResult(order_id=order_id, fill_price=None, reason="limit_not_crossed")
 

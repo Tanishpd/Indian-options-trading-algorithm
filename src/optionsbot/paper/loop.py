@@ -282,8 +282,14 @@ class PaperSession:
             attempt = self._flatten_attempts.get(key, 0) + 1
             self._flatten_attempts[key] = attempt
             q = chain.get(key)
-            reference = q.ltp if q is not None else self._last_marks.get(key, pos.entry_price)
             side = pos.leg.side.opposite
+            # Band away from the side we must actually reach (ask when buying
+            # back, bid when selling out); LTP only when depth is unavailable.
+            if q is not None:
+                touch = q.ask if side is Side.BUY else q.bid
+                reference = float(touch) if touch else q.ltp
+            else:
+                reference = self._last_marks.get(key, pos.entry_price)
             band = min(base_band * attempt, _MAX_FLATTEN_BAND)
             limit = to_tick(protection_band_limit(reference, side, band), side)
             if q is None:
@@ -326,7 +332,7 @@ class PaperSession:
         for expiry in sorted(expiries):
             chain.update(self.feed.option_chain(self.index, expiry, spot=spot))
         self._snapshot_chain(now, chain)
-        self.broker.set_quotes({k: q.ltp for k, q in chain.items()})
+        self.broker.set_quotes(chain)  # full quotes: buys must reach the ask, sells the bid
 
         past = [p for p in book if p.leg.expiry < today]
         if past and not self.switch.halted:

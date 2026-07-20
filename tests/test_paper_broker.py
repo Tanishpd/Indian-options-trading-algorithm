@@ -126,3 +126,42 @@ def test_costs_charged_by_default():
     r = b.place_limit_order(BUY_LEG, 60.0, 65)
     assert r.filled
     assert b.margin_available() < 100000.0 - 60.0 * 65  # premium plus real costs
+
+
+class Q:
+    """Feed-style quote with depth."""
+
+    def __init__(self, ltp, bid=None, ask=None):
+        self.ltp, self.bid, self.ask = ltp, bid, ask
+
+
+def test_buy_must_reach_the_ask():
+    b = broker()
+    b.set_quote(BUY_LEG, Q(ltp=60.0, bid=59.5, ask=60.5))
+    # A limit at LTP would have filled under the old LTP-only model.
+    assert b.place_limit_order(BUY_LEG, 60.0, 65).reason == "limit_not_crossed"
+    r = b.place_limit_order(BUY_LEG, 60.5, 65)
+    assert r.filled and r.fill_price == 60.5
+
+
+def test_sell_must_reach_the_bid():
+    b = broker()
+    b.set_quote(SELL_LEG, Q(ltp=60.0, bid=59.5, ask=60.5))
+    assert b.place_limit_order(SELL_LEG, 60.0, 65).reason == "limit_not_crossed"
+    r = b.place_limit_order(SELL_LEG, 59.5, 65)
+    assert r.filled and r.fill_price == 59.5
+
+
+def test_falls_back_to_ltp_without_depth():
+    b = broker()
+    b.set_quote(BUY_LEG, Q(ltp=60.0))          # no bid/ask from the feed
+    assert b.place_limit_order(BUY_LEG, 60.0, 65).filled
+    b2 = broker()
+    b2.set_quote(BUY_LEG, 60.0)                # bare float still supported
+    assert b2.place_limit_order(BUY_LEG, 60.0, 65).filled
+
+
+def test_zero_depth_treated_as_missing():
+    b = broker()
+    b.set_quote(BUY_LEG, Q(ltp=60.0, bid=0.0, ask=0.0))   # untraded book
+    assert b.place_limit_order(BUY_LEG, 60.0, 65).filled  # falls back to LTP
