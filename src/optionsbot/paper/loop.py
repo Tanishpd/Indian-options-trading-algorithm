@@ -100,6 +100,7 @@ class PaperSession:
     market_open: time = time(9, 15)
     market_close: time = time(15, 30)
     force_squareoff: time = time(15, 0)   # session-level expiry-day backstop
+    collect_expiries: int = 3             # archive this many listed expiries per tick
     flatten_alert_after: int = 3          # page owner after N unfilled flatten tries
     reconnect_after: int = 3              # attempt re-auth after N consecutive failures
     data_dir: Path = Path("data/live")
@@ -234,12 +235,22 @@ class PaperSession:
 
     # -- expiry -----------------------------------------------------------------
 
-    def _current_expiry(self, today: date) -> date:
-        """The exchange's own next listed expiry — survives holiday shifts."""
-        listed = [d for d in self.feed.list_expiries(self.index) if d >= today]
+    def _listed_expiries(self, today: date) -> list[date]:
+        """Exchange-listed expiries on/after today, ascending."""
+        listed = sorted(d for d in self.feed.list_expiries(self.index) if d >= today)
         if not listed:
             raise RuntimeError(f"no listed {self.index} expiries on/after {today}")
-        expiry = listed[0]
+        return listed
+
+    def _current_expiry(self, today: date, listed: list[date] | None = None) -> date:
+        """The exchange's own next listed expiry — survives holiday shifts.
+
+        Callers that already hold a listing pass it in, so the front expiry and
+        the archival window are always derived from the same snapshot: a listing
+        that changed between two fetches could otherwise make them disagree
+        about which expiry is tradeable.
+        """
+        expiry = (listed or self._listed_expiries(today))[0]
         computed = next_weekly_expiry(self.index, today, self.cfg.market.holidays)
         if expiry != computed:
             self.log(f"expiry {expiry} from exchange listing (calendar computed {computed})")
@@ -324,13 +335,24 @@ class PaperSession:
         self.broker.today = today
 
         book = self.broker.book()
-        expiries = {self._current_expiry(today)}
+        listed = self._listed_expiries(today)
+        front = self._current_expiry(today, listed)
+        # Archive several expiries even though only the front one is traded: a
+        # contract's early life cannot be bought back once it expires, and no
+        # vendor sells historical bid/ask (see issues #13/#14).
+        expiries = set(listed[: max(1, self.collect_expiries)])
         expiries |= {p.leg.expiry for p in book if p.leg.expiry >= today}
 
         spot = self.feed.spot(self.index)
         chain: dict[LegKey, Quote] = {}
         for expiry in sorted(expiries):
-            chain.update(self.feed.option_chain(self.index, expiry, spot=spot))
+            try:
+                chain.update(self.feed.option_chain(self.index, expiry, spot=spot))
+            except Exception as exc:
+                # A far expiry failing must never cost us the tradeable front one.
+                if expiry == front or any(p.leg.expiry == expiry for p in book):
+                    raise
+                self.log(f"chain fetch failed for {expiry} (archival only): {exc!r}")
         self._snapshot_chain(now, chain)
         self.broker.set_quotes(chain)  # full quotes: buys must reach the ask, sells the bid
 
@@ -356,7 +378,7 @@ class PaperSession:
             book_by_key = {p.leg.key: p for p in book}
             equity = self._equity(book, chain)
             ctx = PaperContext(
-                now=now, index=self.index, expiry=min(expiries), spot=spot, chain=chain,
+                now=now, index=self.index, expiry=front, spot=spot, chain=chain,
                 positions=tuple(book), cash=self.broker.margin_available(), equity=equity,
                 lot_size=self.cfg.market.lot_size(self.index, today),
                 strike_step=self.cfg.market.strike_step(self.index),
@@ -408,6 +430,8 @@ class PaperSession:
 
             try:
                 self.tick()
+                if self._failures:
+                    self._page(f"feed recovered after {self._failures} failed tick(s)")
                 self._failures = 0
             except Exception as exc:  # keep the session alive; escalate loudly
                 self._failures += 1

@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 import pytest
 
@@ -22,6 +22,8 @@ class FakeFeed:
         self._expiries = expiries or [EXPIRY]
         self.connected = False
         self.reconnects = 0
+        self.requested = []
+        self.fail_expiries = set()
 
     def connect(self):
         self.connected = True
@@ -36,6 +38,9 @@ class FakeFeed:
         return sorted(self._expiries)
 
     def option_chain(self, index, expiry, spot=None):
+        if expiry in self.fail_expiries:
+            raise RuntimeError(f"synthetic feed failure for {expiry}")
+        self.requested.append(expiry)
         return {k: q for k, q in self.chain.items() if k[1] == expiry}
 
     def lot_size(self, index, expiry):
@@ -271,3 +276,152 @@ def test_expiry_taken_from_exchange_listing(tmp_path):
     feed = FakeFeed(chain={}, expiries=[shifted, date(2026, 7, 21)])
     s = session(tmp_path, CollectOnly(), feed=feed)
     assert s._current_expiry(NOW.date()) == shifted
+
+
+NEXT_1, NEXT_2, NEXT_3 = date(2026, 7, 21), date(2026, 7, 28), date(2026, 8, 4)
+
+
+def multi_expiry_feed():
+    """Quotes across four listed expiries."""
+    chain = {}
+    for exp in (EXPIRY, NEXT_1, NEXT_2, NEXT_3):
+        chain[("NIFTY", exp, 25900.0, Right.CALL)] = Quote(ltp=60.0, bid=59.5, ask=60.5)
+    return FakeFeed(chain=chain, expiries=[EXPIRY, NEXT_1, NEXT_2, NEXT_3])
+
+
+def test_archives_several_expiries_but_trades_the_front(tmp_path):
+    feed = multi_expiry_feed()
+    s = session(tmp_path, NullStrategy(), feed=feed)
+    s.tick()
+
+    # Three listed expiries archived (default collect_expiries=3), not just one.
+    assert feed.requested == [EXPIRY, NEXT_1, NEXT_2]
+    snap = (tmp_path / "live" / f"chain_NIFTY_{NOW:%Y%m%d}.csv").read_text().splitlines()
+    assert len(snap) == 4                       # header + one quote per expiry
+    assert {line.split(",")[2] for line in snap[1:]} == {
+        EXPIRY.isoformat(), NEXT_1.isoformat(), NEXT_2.isoformat()
+    }
+
+
+def test_strategy_sees_only_the_front_expiry(tmp_path):
+    seen = []
+
+    class Watcher(NullStrategy):
+        def decide(self, ctx):
+            seen.append(ctx.expiry)
+            return []
+
+    s = session(tmp_path, Watcher(), feed=multi_expiry_feed())
+    s.tick()
+    assert seen == [EXPIRY]
+
+
+def test_far_expiry_failure_does_not_break_the_tick(tmp_path):
+    feed = multi_expiry_feed()
+    feed.fail_expiries = {NEXT_2}               # archival-only expiry is broken
+    s = session(tmp_path, BuyOnce(), feed=feed)
+    s.tick()                                    # must still trade the front expiry
+    assert len(s.broker.book()) == 1
+
+
+def test_front_expiry_failure_still_raises(tmp_path):
+    feed = multi_expiry_feed()
+    feed.fail_expiries = {EXPIRY}               # the tradeable expiry is broken
+    s = session(tmp_path, NullStrategy(), feed=feed)
+    with pytest.raises(RuntimeError, match="synthetic feed failure"):
+        s.tick()
+
+
+def test_held_expiry_is_always_fetched(tmp_path):
+    """A position beyond the archival window must still be quoted every tick,
+    otherwise it could never be marked or closed."""
+    far = date(2026, 9, 1)
+    chain = {
+        ("NIFTY", EXPIRY, 25900.0, Right.CALL): Quote(ltp=60.0, bid=59.5, ask=60.5),
+        ("NIFTY", far, 25900.0, Right.CALL): Quote(ltp=60.0, bid=59.5, ask=60.5),
+    }
+    feed = FakeFeed(chain=chain, expiries=[EXPIRY, NEXT_1, NEXT_2, far])
+
+    # Seed a held far-dated position through the persisted state file.
+    seed = session(tmp_path, NullStrategy(), feed=feed)
+    seed.broker.set_quote(OptionLeg("NIFTY", far, 25900.0, Right.CALL, Side.BUY), 60.0)
+    seed.broker.today = NOW.date()
+    seed.broker.place_limit_order(
+        OptionLeg("NIFTY", far, 25900.0, Right.CALL, Side.BUY), 60.5, 65
+    )
+    seed._persist()
+
+    feed.requested.clear()
+    s = session(tmp_path, NullStrategy(), feed=feed,
+                cfg=make_cfg(max_dd=500000.0, daily=500000.0, per_trade=500000.0,
+                             costs=ZERO_COSTS))
+    s.tick()
+    assert far in feed.requested          # beyond collect_expiries, but held
+    assert EXPIRY in feed.requested       # front expiry still archived
+
+
+class FlakyFeed(FakeFeed):
+    """Fails the first N option_chain calls, then behaves."""
+
+    def __init__(self, fail_first=1, **kw):
+        super().__init__(**kw)
+        self.remaining_failures = fail_first
+
+    def option_chain(self, index, expiry, spot=None):
+        if self.remaining_failures:
+            self.remaining_failures -= 1
+            raise RuntimeError("synthetic transient outage")
+        return super().option_chain(index, expiry, spot=spot)
+
+
+def test_run_pages_on_recovery_after_failures(tmp_path, monkeypatch):
+    """run() must tell the owner when the feed comes back, not only when it breaks."""
+    import optionsbot.paper.loop as loop_mod
+
+    monkeypatch.setattr(loop_mod.time_mod, "sleep", lambda _s: None)
+    # run()'s startup consumes two clock reads before the loop begins.
+    clock = {"t": datetime(2026, 7, 9, 15, 25)}
+
+    def advancing_now():
+        now = clock["t"]
+        clock["t"] = now + timedelta(minutes=1)
+        return now
+
+    feed = FlakyFeed(fail_first=1, chain=CHAIN, expiries=[EXPIRY])
+    s = PaperSession(
+        cfg=make_cfg(costs=ZERO_COSTS), feed=feed, strategy=NullStrategy(),
+        data_dir=tmp_path / "live", state_path=tmp_path / "state.json",
+        now_fn=advancing_now, log=lambda m: None, poll_seconds=5,
+    )
+    s.reconnect_after = 99          # keep the failure path from paging first
+    s.run()
+
+    assert any("feed recovered after 1 failed tick" in a for a in s.alerts)
+
+
+def test_expiry_listing_fetched_once_per_tick(tmp_path):
+    """front and the archival window must come from one listing snapshot."""
+    feed = multi_expiry_feed()
+    calls = {"n": 0}
+    inner = feed.list_expiries
+
+    def counting(index):
+        calls["n"] += 1
+        return inner(index)
+
+    feed.list_expiries = counting
+    session(tmp_path, NullStrategy(), feed=feed).tick()
+    assert calls["n"] == 1
+
+
+def test_collect_expiries_is_configurable(tmp_path):
+    feed = multi_expiry_feed()
+    s = session(tmp_path, NullStrategy(), feed=feed)
+    s.collect_expiries = 1
+    s.tick()
+    assert feed.requested == [EXPIRY]        # front only
+
+    feed.requested.clear()
+    s.collect_expiries = 4
+    s.tick()
+    assert feed.requested == [EXPIRY, NEXT_1, NEXT_2, NEXT_3]

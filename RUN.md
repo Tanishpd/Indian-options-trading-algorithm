@@ -93,7 +93,10 @@ state atomically to `data/live/paper_state.json` — restarts recover positions,
 entry basis, and marks, and a halted switch **stays halted across restarts**.
 
 Session-level guarantees (independent of any strategy): expiry comes from the
-exchange's own listed expiries (holiday-shifted weeks handled); legs expiring
+exchange's own listed expiries (holiday-shifted weeks handled); the front N listed
+expiries are archived each tick (N = `PaperSession.collect_expiries`, default 3)
+while only the front one is tradeable — a contract's early life cannot be bought
+back once it expires; legs expiring
 today are force-flattened after 15:00; naked-book and per-trade-cap checks run
 every tick; kill-switch flattens escalate their band and page the owner after
 3 unfilled attempts; feed failures trigger a re-auth attempt and pages; the
