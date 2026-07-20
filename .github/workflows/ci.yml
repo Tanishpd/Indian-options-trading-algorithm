@@ -29,6 +29,12 @@ jobs:
       id-token: write
       contents: read
     steps:
+      - name: Debug OIDC claims (temporary)
+        run: |
+          RESP=$(curl -s -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=sts.amazonaws.com")
+          PAYLOAD=$(echo "$RESP" | python3 -c "import sys,json;print(json.load(sys.stdin)['value'].split('.')[1])")
+          PAD=$(python3 -c "p='$PAYLOAD';print(p + '='*(-len(p)%4))")
+          echo "$PAD" | base64 -d | python3 -c "import sys,json;c=json.load(sys.stdin);print({k:c[k] for k in ('iss','aud','sub','repository','ref') if k in c})"
       - name: Authenticate to AWS (OIDC, keyless)
         uses: aws-actions/configure-aws-credentials@v4
         with:
