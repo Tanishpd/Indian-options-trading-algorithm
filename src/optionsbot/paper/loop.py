@@ -339,8 +339,7 @@ class PaperSession:
         front = self._current_expiry(today, listed)
         # Archive several expiries even though only the front one is traded: a
         # contract's early life cannot be bought back once it expires, and no
-        # vendor sells historical bid/ask (see issues #13/#14).
-        expiries = set(listed[: max(1, self.collect_expiries)])
+        # vendor sells historical bid/ask (see issue #13).
         expiries |= {p.leg.expiry for p in book if p.leg.expiry >= today}
 
         spot = self.feed.spot(self.index)
