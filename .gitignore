@@ -13,3 +13,6 @@ docs/decisions/
 .DS_Store
 # local agent/tooling config — not part of the published project
 CLAUDE.md
+
+# machine-local agent permissions — accrues entries automatically, never review-gated
+.claude/settings.local.json
