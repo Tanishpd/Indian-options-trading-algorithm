@@ -1,5 +1,7 @@
 # Indian Options Trading Algorithm
 
+[![CI](https://github.com/Tanishpd/Indian-options-trading-algorithm/actions/workflows/ci.yml/badge.svg)](https://github.com/Tanishpd/Indian-options-trading-algorithm/actions/workflows/ci.yml)
+
 An automated, defined-risk options trading system for Indian index derivatives (NIFTY and SENSEX weekly options), currently operating in paper-trading mode. The project is built research-first, with risk management as the primary design constraint: a hard maximum-drawdown limit governs every component.
 
 **Status:** Live paper trading using Angel One SmartAPI market data with simulated order execution and a complete transaction-cost model. No real orders are placed.
