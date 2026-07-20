@@ -32,16 +32,25 @@ class MarketQuote:
     def coerce(cls, value) -> "MarketQuote":
         if isinstance(value, cls):
             return value
+        ltp = getattr(value, "ltp", value)
         bid = getattr(value, "bid", None)
         ask = getattr(value, "ask", None)
-        ltp = getattr(value, "ltp", value)
-        return cls(ltp=float(ltp), bid=bid, ask=ask)
+
+        def _norm(px: object) -> float | None:
+            """Depth is either a positive float or absent — matching the feed,
+            which only sets bid/ask when the book quotes a price above zero."""
+            if px is None:
+                return None
+            px = float(px)
+            return px if px > 0.0 else None
+
+        return cls(ltp=float(ltp), bid=_norm(bid), ask=_norm(ask))
 
     def executable(self, side: Side) -> float:
         """Price this side must reach to trade: the ask when buying, the bid
         when selling; LTP when the book is unavailable."""
         quoted = self.ask if side is Side.BUY else self.bid
-        return float(quoted) if quoted else self.ltp
+        return quoted if quoted is not None else self.ltp
 
 
 @dataclass(frozen=True)

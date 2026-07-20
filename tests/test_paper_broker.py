@@ -165,3 +165,16 @@ def test_zero_depth_treated_as_missing():
     b = broker()
     b.set_quote(BUY_LEG, Q(ltp=60.0, bid=0.0, ask=0.0))   # untraded book
     assert b.place_limit_order(BUY_LEG, 60.0, 65).filled  # falls back to LTP
+
+
+def test_quote_coercion_normalizes_depth():
+    from optionsbot.broker.paper import MarketQuote
+
+    q = MarketQuote.coerce(Q(ltp="60", bid="59.5", ask=0))
+    assert (q.ltp, q.bid, q.ask) == (60.0, 59.5, None)   # floats; 0 means absent
+    assert q.executable(Side.BUY) == 60.0                # no ask -> falls back to LTP
+    assert q.executable(Side.SELL) == 59.5
+
+    neg = MarketQuote.coerce(Q(ltp=60.0, bid=-1.0, ask=60.5))
+    assert neg.bid is None and neg.ask == 60.5
+    assert MarketQuote.coerce(60) == MarketQuote(ltp=60.0, bid=None, ask=None)
