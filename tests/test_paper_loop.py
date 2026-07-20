@@ -397,3 +397,31 @@ def test_run_pages_on_recovery_after_failures(tmp_path, monkeypatch):
     s.run()
 
     assert any("feed recovered after 1 failed tick" in a for a in s.alerts)
+
+
+def test_expiry_listing_fetched_once_per_tick(tmp_path):
+    """front and the archival window must come from one listing snapshot."""
+    feed = multi_expiry_feed()
+    calls = {"n": 0}
+    inner = feed.list_expiries
+
+    def counting(index):
+        calls["n"] += 1
+        return inner(index)
+
+    feed.list_expiries = counting
+    session(tmp_path, NullStrategy(), feed=feed).tick()
+    assert calls["n"] == 1
+
+
+def test_collect_expiries_is_configurable(tmp_path):
+    feed = multi_expiry_feed()
+    s = session(tmp_path, NullStrategy(), feed=feed)
+    s.collect_expiries = 1
+    s.tick()
+    assert feed.requested == [EXPIRY]        # front only
+
+    feed.requested.clear()
+    s.collect_expiries = 4
+    s.tick()
+    assert feed.requested == [EXPIRY, NEXT_1, NEXT_2, NEXT_3]

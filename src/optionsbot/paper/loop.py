@@ -242,9 +242,15 @@ class PaperSession:
             raise RuntimeError(f"no listed {self.index} expiries on/after {today}")
         return listed
 
-    def _current_expiry(self, today: date) -> date:
-        """The exchange's own next listed expiry — survives holiday shifts."""
-        expiry = self._listed_expiries(today)[0]
+    def _current_expiry(self, today: date, listed: list[date] | None = None) -> date:
+        """The exchange's own next listed expiry — survives holiday shifts.
+
+        Callers that already hold a listing pass it in, so the front expiry and
+        the archival window are always derived from the same snapshot: a listing
+        that changed between two fetches could otherwise make them disagree
+        about which expiry is tradeable.
+        """
+        expiry = (listed or self._listed_expiries(today))[0]
         computed = next_weekly_expiry(self.index, today, self.cfg.market.holidays)
         if expiry != computed:
             self.log(f"expiry {expiry} from exchange listing (calendar computed {computed})")
@@ -330,7 +336,7 @@ class PaperSession:
 
         book = self.broker.book()
         listed = self._listed_expiries(today)
-        front = self._current_expiry(today)
+        front = self._current_expiry(today, listed)
         # Archive several expiries even though only the front one is traded: a
         # contract's early life cannot be bought back once it expires, and no
         # vendor sells historical bid/ask (see issues #13/#14).
