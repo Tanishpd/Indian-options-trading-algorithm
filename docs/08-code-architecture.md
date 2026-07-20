@@ -55,7 +55,13 @@ Implements [docs/05](05-costs-and-taxes.md) exactly:
 - Returns a `CostBreakdown` per fill so reports can show cost drag line-by-line.
 
 ### `fills.py`
-Bar-based limit-order simulator, conservative by design:
+Bar-based limit-order simulator, conservative by design. The live paper path
+adds a second realism layer in `broker/paper.py`: an order crosses only when
+the *executable* side reaches the limit (buys must reach the ask, sells the
+bid), with LTP standing in only when the feed provides no depth — so spread
+cost is paid rather than assumed away. Measured on collected NIFTY chains,
+spreads at traded strikes run Rs 0.10-0.20 (about Rs 3-7 per lot per crossing,
+so roughly Rs 25-55 per four-leg round trip).
 - BUY limit fills only if `bar.low <= limit`, at the limit price (never assume price improvement). SELL fills only if `bar.high >= limit`.
 - Gap through the band → **no fill** (mirrors the real risk that protection-band orders give no guarantee on gaps).
 - `protection_band_price(reference, side, band_pct)` mimics broker band construction; band width is config.

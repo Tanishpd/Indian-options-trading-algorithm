@@ -42,7 +42,7 @@ class CondorParams:
     profit_target_frac: float = 0.5    # exit when buyback cost <= 50% of credit
     stop_credit_mult: float = 2.0      # exit when buyback cost >= 2x credit
     squareoff: time = time(14, 45)     # expiry-day hard exit (docs/05 rule 3)
-    limit_pad: float = 0.005           # cross the LTP by 0.5% so limits fill
+    limit_pad: float = 0.005           # cross the touch price by 0.5% so limits fill
     pad_growth: float = 0.5            # extra pad per unfilled retry (x limit_pad)
     max_pad_mult: float = 5.0
 
@@ -90,8 +90,12 @@ class ReferenceCondor:
         q = ctx.chain.get(leg.key)
         if q is None:
             return None
+        # Price from the side that must be reached (ask to buy, bid to sell),
+        # then pad past it; LTP only when the feed gives no depth.
+        touch = getattr(q, "ask" if leg.side is Side.BUY else "bid", None)
+        base = float(touch) if touch else q.ltp
         pad = 1 + self._pad() if leg.side is Side.BUY else 1 - self._pad()
-        return Order(leg, to_tick(q.ltp * pad, leg.side))
+        return Order(leg, to_tick(base * pad, leg.side))
 
     def _leg(self, ctx, spec: dict) -> OptionLeg:
         return OptionLeg(
@@ -174,8 +178,15 @@ class ReferenceCondor:
             self._say("entry skipped: missing quotes")
             return []
 
+        # Estimate the credit at prices actually obtainable (sell into the
+        # bid, buy at the ask) so the per-trade cap check is not optimistic.
+        def touch(leg, q):
+            side_px = getattr(q, "bid" if leg.side is Side.SELL else "ask", None)
+            return float(side_px) if side_px else q.ltp
+
         credit = sum(
-            (q.ltp if leg.side is Side.SELL else -q.ltp) for leg, q in zip(legs, quotes)
+            (touch(leg, q) if leg.side is Side.SELL else -touch(leg, q))
+            for leg, q in zip(legs, quotes)
         )
         worst = (width - credit) * ctx.lot_size
         if worst > self.risk.per_trade_max_loss_rupees:

@@ -224,3 +224,37 @@ def test_state_roundtrip():
     s2.from_state(s.to_state())
     assert s2.phase == "entering"
     assert s2.targets == s.targets
+
+
+class DepthQuote:
+    def __init__(self, ltp, bid, ask):
+        self.ltp, self.bid, self.ask = ltp, bid, ask
+
+
+def depth_chain(sc, lc, sp, lp, spread=0.5):
+    """Quotes with a bid/ask spread around each LTP."""
+    def q(x):
+        return DepthQuote(x, round(x - spread / 2, 2), round(x + spread / 2, 2))
+    return {
+        key(SC, Right.CALL): q(sc), key(LC, Right.CALL): q(lc),
+        key(SP, Right.PUT): q(sp), key(LP, Right.PUT): q(lp),
+    }
+
+
+def test_credit_estimated_at_executable_prices():
+    # LTP credit would be 24.00; selling the bid and buying the ask gives
+    # 24.00 - 4 x 0.25 = 23.00, so the cap check sees the honest number.
+    s = strategy()
+    s.decide(ctx(ENTRY_TIME, depth_chain(**GOOD_QUOTES)))
+    assert any("quoted credit 23.00" in m for m in s.log)
+
+
+def test_orders_price_from_the_touch_not_ltp():
+    s = strategy()
+    orders = s.decide(ctx(ENTRY_TIME, depth_chain(**GOOD_QUOTES)))
+    buys = {o.leg.strike: o.limit_price for o in orders if o.leg.side is Side.BUY}
+    # Long call: ask 18.25, padded up 0.5% -> 18.35 on the tick grid (>= ask).
+    assert buys[LC] >= 18.25
+    sells = {o.leg.strike: o.limit_price for o in orders if o.leg.side is Side.SELL}
+    # Short call: bid 29.75, padded down -> at or below the bid so it crosses.
+    assert sells[SC] <= 29.75
