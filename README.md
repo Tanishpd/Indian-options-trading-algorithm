@@ -26,6 +26,10 @@ An automated, defined-risk options trading system for Indian index derivatives (
 - **Shared risk-management layer** enforcing the prohibition on naked short options, a per-trade worst-case loss limit, and a drawdown kill-switch that persists across restarts and requires an audited manual re-arm
 - **Test suite** of 130+ tests covering cost arithmetic, fill logic, risk enforcement, calendar handling, and session persistence
 
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). Pull requests are welcome; only the repository owner merges to `main`, and all changes must pass the test suite in CI.
+
 ## Design principles
 
 - Market data predating November 2024 is rejected: contract specifications and expiry conventions changed materially, making older data unrepresentative
