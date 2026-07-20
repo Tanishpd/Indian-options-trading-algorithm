@@ -30,7 +30,7 @@ jobs:
       contents: read
     steps:
       - name: Authenticate to AWS (OIDC, keyless)
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: arn:aws:iam::863760760673:role/optionsbot-deploy
           aws-region: ap-south-1
