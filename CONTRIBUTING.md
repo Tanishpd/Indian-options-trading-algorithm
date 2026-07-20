@@ -17,7 +17,7 @@ Write access is not granted to contributors. External contributions are made by 
 ## Before opening a pull request
 
 1. Run the test suite locally: `python -m pytest -q`
-2. Add tests covering any new behaviour
+2. Add tests covering any new behavior
 3. Complete the risk-impact checklist in the pull request template
 
 Changes touching the risk-enforcement layer (kill-switch, per-trade loss cap, naked-short prohibition) or the transaction-cost model receive additional scrutiny: these components exist to bound losses, and their invariants are enforced in code and pinned by tests. If a change alters them, say so explicitly in the pull request description.
