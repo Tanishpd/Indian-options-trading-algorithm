@@ -93,7 +93,7 @@
       "Bash(python3 -c \"import tomllib; print\\('tomllib ok'\\)\")",
       "Bash(python3 -m pytest --version)",
       "WebFetch(domain:stockmojo.in)",
-      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
       "WebFetch(domain:forum.definedgesecurities.com)"
     ]
   }
