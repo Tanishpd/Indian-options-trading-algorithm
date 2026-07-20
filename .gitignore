@@ -1,0 +1,15 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+data/
+secrets/
+*.env
+# private ops records (server IPs, instance ids) and local artifacts
+docs/decisions/
+*.log
+*.pem
+.DS_Store
+# local agent/tooling config — not part of the published project
+CLAUDE.md

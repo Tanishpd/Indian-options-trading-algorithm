@@ -1,0 +1,37 @@
+# All tunable parameters live here — never hardcoded in strategy or engine code.
+# STT rates are NOT here: they are dated, SEBI-verified constants in costs.py.
+
+[capital]
+starting_rupees = 100000.0
+
+[costs]
+brokerage_per_order = 20.0
+# The three rates below were not verified by research — verify against your
+# broker's contract note before trusting backtest cost totals.
+txn_charge_rate = 0.0003503   # exchange transaction charge, on premium
+sebi_fee_rate = 0.000001      # SEBI turnover fee (~Rs 10/crore), on premium
+stamp_duty_rate = 0.00003     # buy side only, on premium
+gst_rate = 0.18               # on brokerage + txn charges + SEBI fee
+
+[risk]
+max_drawdown_rupees = 5000.0        # hard kill-switch cap (tight end of 5-10%)
+daily_loss_limit_rupees = 2000.0
+per_trade_max_loss_rupees = 2000.0  # 1-2% of capital rule (docs/04)
+
+[fills]
+protection_band_pct = 0.05
+
+[market]
+holidays = []                 # TOML dates: [2026-10-02, ...] (quoted strings also accepted)
+
+# Lot sizes are DATE-DEPENDENT (NIFTY changed twice inside the supported
+# window). Either a plain int (constant from Nov 2024) or a schedule.
+# Effective dates approximate the contract-revision calendar — verify against
+# NSE circulars NSE/FAOP/64625 (25->75) and NSE/FAOP/70616 (75->65).
+[market.lot_sizes]
+NIFTY = [
+  { from = 2024-11-01, size = 25 },
+  { from = 2025-01-02, size = 75 },
+  { from = 2026-01-01, size = 65 },
+]
+# SENSEX: add when confirmed from BSE circulars
