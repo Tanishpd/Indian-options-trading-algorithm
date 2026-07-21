@@ -47,7 +47,19 @@ reading both findings documents first.**
 | Study | Data | Result |
 |---|---|---|
 | [docs/10](docs/10-first-backtest-findings.md) | EOD bhavcopy, 71 trades, 20 months | net −₹16,740, gross +₹75, max DD 22.6% |
-| [docs/11](docs/11-intraday-backtest-findings.md) | Minute bars, 72 cycles, 17 months | net −₹18,191, gross −₹1,993, max DD 18.2% |
+| [docs/11](docs/11-intraday-backtest-findings.md) | Minute bars, 72 cycles, 17 months | net −₹21,066, gross −₹4,828, max DD 21.1% |
+
+**Why**, established in [docs/12](docs/12-where-the-edge-actually-is.md): the
+variance risk premium is **real and significant at +2.08 volatility points
+(t = 2.95)** — options are not efficiently priced — but it is worth ~₹240 per
+condor against a ₹226 cost floor. 20%/yr requires **5.4 points**. Flat per-order
+brokerage alone consumes **8.2%/yr** of a ₹1 lakh account, and even at unlimited
+capital this structure ceilings around **+10.3%**.
+
+**Pre-commitment before any further work on premium selling**: measure the VRP on
+~4 years of NIFTY EOD history. **If its 95% upper bound is below 5.4 volatility
+points, the mandate is dead structurally and no further parameter search is
+justified.**
 
 The second study tests the rules the bot actually runs (time-window entry,
 target/stop exits, expiry square-off), which EOD data structurally cannot
