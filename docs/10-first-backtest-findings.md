@@ -104,6 +104,43 @@ worse than reported, not better.
 Also untested here: implied-volatility or regime filters, alternative entry
 timing, and directional or calendar structures.
 
+## Follow-up: the implied-volatility filter also fails (issue #25)
+
+The one signal worth chasing was that high-premium cycles looked different. That
+was retested as an explicit rule applied to **every** cycle — enter only when the
+credit is at least X% of the wing width — rather than letting it emerge as a
+side-effect of the risk cap.
+
+Full-sample results improve and one threshold turns positive: at 55%, 45 trades
+net **+₹1,269** with a 49% win rate. Gross per trade rises from ₹1 (unfiltered)
+to ₹274.
+
+**It does not survive validation.**
+
+| Threshold | Full net | Train net | Holdout net | Holdout gross/trade |
+|---|---:|---:|---:|---:|
+| 50% | −₹7,015 | +₹1,650 | −₹8,664 | −₹82 |
+| **55%** | **+₹1,269** | +₹6,021 | **−₹4,752** | +₹21 |
+| 60% | +₹35 | +₹6,480 | −₹6,445 | −₹114 |
+
+Every threshold flips sign between train and holdout, and **holdout net is
+negative at every threshold tested**. Splitting into thirds shows why: the entire
+result comes from **3 trades** in one window.
+
+| Period | Trades | Gross | Net |
+|---|---:|---:|---:|
+| Nov 2024 – May 2025 | 22 | ₹5,074 | −₹140 |
+| May – Dec 2025 | **3** | **₹6,810** | +₹6,161 |
+| Dec 2025 – Jul 2026 | 20 | ₹429 | −₹4,752 |
+
+Gross per trade out of sample is ₹21 against ₹475 in training. Three trades
+during a single volatility episode that resolved favourably is luck wearing the
+costume of an edge — the same shape as the selection artifact this experiment was
+designed to rule out, reproduced under a rule that was supposed to eliminate it.
+
+**Conclusion: no volatility-timing edge is detectable in this strategy family on
+this data.**
+
 ## Bearing on the mandate
 
 The target is 20–25% annually with a 5–10% maximum drawdown. This

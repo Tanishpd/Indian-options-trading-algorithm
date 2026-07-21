@@ -34,6 +34,7 @@ class CondorParams:
     wing_points: float = 200.0     # wing distance from each short
     entry_days_before: int = 4     # trading days before expiry to enter
     strike_step: float = 50.0
+    min_credit_frac: float = 0.0   # skip unless credit >= this share of wing width
 
 
 @dataclass(frozen=True)
@@ -62,6 +63,16 @@ class Study:
     skipped: dict[str, int]
 
     @property
+    def total_cycles(self) -> int:
+        """Expiries this run considered — trades plus every skip reason.
+
+        A valid denominator within a single run. Not additive across
+        partitions: an expiry straddling a walk-forward boundary is genuinely
+        considered by both halves.
+        """
+        return len(self.trades) + sum(self.skipped.values())
+
+    @property
     def net(self) -> float:
         return sum(t.net for t in self.trades)
 
@@ -75,7 +86,11 @@ class Study:
 
     @property
     def win_rate(self) -> float:
-        return 100.0 * sum(t.won for t in self.trades) / len(self.trades) if self.trades else 0.0
+        """NaN with no trades: a 0.0 sentinel is indistinguishable from a
+        genuine 0% win rate in a parameter sweep."""
+        if not self.trades:
+            return float("nan")
+        return 100.0 * sum(t.won for t in self.trades) / len(self.trades)
 
     def equity_curve(self, start_capital: float) -> list[float]:
         eq, out = start_capital, [start_capital]
@@ -85,6 +100,10 @@ class Study:
         return out
 
     def max_drawdown(self, start_capital: float) -> float:
+        """NaN with no trades, so an empty configuration cannot surface in a
+        sweep as a zero-drawdown strategy meeting the mandate."""
+        if not self.trades:
+            return float("nan")
         peak, worst = start_capital, 0.0
         for v in self.equity_curve(start_capital):
             peak = max(peak, v)
@@ -110,8 +129,8 @@ def run(
     """One condor per expiry cycle, entered and exited at closing prices."""
     days = sorted(by_day)
     trades: list[Trade] = []
-    skipped = {"no_entry_day": 0, "missing_legs": 0, "over_cap": 0, "no_exit": 0,
-               "untraded_leg": 0}
+    skipped = {"expiry_outside_range": 0, "no_entry_day": 0, "missing_legs": 0,
+               "over_cap": 0, "no_exit": 0, "untraded_leg": 0, "credit_too_thin": 0}
 
     indices = {r.index for rows in by_day.values() for r in rows}
     if len(indices) > 1:
@@ -123,7 +142,14 @@ def run(
     expiries = sorted({r.expiry for rows in by_day.values() for r in rows})
     for expiry in expiries:
         if expiry not in by_day:
-            continue                                   # expiry day itself not in range
+            # Expiry day falls outside the loaded range, so the cycle cannot
+            # be completed. Counted rather than dropped so every expiry the
+            # study saw lands in exactly one bucket and total_cycles is a
+            # trustworthy denominator. Note this is per-run: an expiry
+            # straddling a walk-forward split is legitimately seen by both
+            # halves, so the counts are not additive across partitions.
+            skipped["expiry_outside_range"] += 1
+            continue
         trading_days = [d for d in days if d < expiry]
         if len(trading_days) < params.entry_days_before:
             skipped["no_entry_day"] += 1
@@ -175,9 +201,24 @@ def run(
             (row.mark if side is Side.SELL else -row.mark)
             for row, (_, _, side) in zip(exit_, legs)
         )
+        # The risk cap is itself a credit floor (credit >= wing - cap/lot), so
+        # the two rules are nested. Checking the cap FIRST means each counter
+        # reports the cycles it alone rejected: with the filter first it would
+        # absorb the cap's rejections and read as though the cap no longer
+        # binds. Trade set and P&L are identical either way; only attribution
+        # differs, and docs/10 relies on that attribution.
         worst_case = (params.wing_points - credit) * lot
         if worst_case > risk.per_trade_max_loss_rupees:
             skipped["over_cap"] += 1
+            continue
+
+        # Volatility filter, applied to EVERY surviving cycle as an explicit
+        # rule so that an edge cannot be the cap's selection artifact (docs/10).
+        # Guarded on > 0 so the 0.0 default is a true no-op: `credit < 0 * wing`
+        # would otherwise drop net-debit cycles, which stale non-synchronous
+        # prints do produce at wider offsets.
+        if params.min_credit_frac > 0 and credit < params.min_credit_frac * params.wing_points:
+            skipped["credit_too_thin"] += 1
             continue
 
         total_costs = 0.0
