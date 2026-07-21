@@ -56,6 +56,33 @@ Hard rules enforced by the loader:
 
 When evaluating vendors, confirm coverage spans the September 2025 expiry-weekday change (NIFTY → Tuesday, SENSEX → Thursday) and, ideally, includes bid/ask for slippage realism.
 
+## 4a. Free EOD data (works today, no account)
+
+NSE and BSE publish end-of-day F&O bhavcopy for free in the identical UDiFF
+schema, covering NIFTY and SENSEX from January 2024. Backfill it with:
+
+```bash
+PYTHONPATH=src .venv/bin/python -m optionsbot.data --index NIFTY \
+  --from 2026-07-01 --to 2026-07-17
+```
+
+Writes one CSV per index per day under `data/eod/`. Weekends, holidays and
+unpublished dates are skipped rather than failed, and re-running only fetches
+what is missing.
+
+**What this data can and cannot do.** It validates hold-to-expiry spread
+economics, strike selection, the cost model, and lot-size history. It **cannot**
+validate intraday-triggered rules: one row per contract per day gives no path
+through the session, so when a day's range contains both the profit target and
+the stop, the data cannot say which was touched first — and that ordering
+decides the trade. Stop-loss logic needs 1-minute data (see issue #13).
+
+Untraded contracts are dropped by default. Their closing price is a stale
+carried-forward figure, not an achievable one: on 2026-07-17, 742 of 1,618
+NIFTY option rows had zero volume and **every one of them carried a non-zero
+close** — one showed 111.05 against a 54.10 settlement. Pass `--keep-untraded`
+to retain them for open-interest or term-structure work.
+
 ## 5. Run a backtest
 
 ```python
