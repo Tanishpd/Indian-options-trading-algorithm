@@ -17,8 +17,9 @@ RISK = RiskConfig(per_trade_max_loss_rupees=2000.0)
 
 def row(day, strike, right, price, underlying=25000.0, lot=65):
     return EodRow(day=day, index="NIFTY", expiry=EXPIRY, strike=strike, right=right,
-                  open=price, high=price, low=price, close=price, settlement=price,
-                  underlying=underlying, volume=100, open_interest=100, lot_size=lot)
+                  open=price, high=price, low=price, close=price, last_price=price,
+                  settlement=price, underlying=underlying, volume=100,
+                  open_interest=100, lot_size=lot)
 
 
 def book(entry_prices, exit_prices, spot=25000.0, exit_spot=25000.0):
@@ -105,3 +106,57 @@ def test_drawdown_tracks_the_trade_sequence():
     s = Study(trades=[t(1000), t(-3000), t(500)], skipped={})
     assert s.net == -1500
     assert s.max_drawdown(100000) == 3000     # peak 101,000 -> trough 98,000
+
+
+def sensex_row(day, strike, right, price, underlying=80000.0, lot=20, expiry=EXPIRY):
+    return EodRow(day=day, index="SENSEX", expiry=expiry, strike=strike, right=right,
+                  open=price, high=price, low=price, close=price, last_price=price,
+                  settlement=price, underlying=underlying, volume=100,
+                  open_interest=100, lot_size=lot)
+
+
+def test_works_on_sensex_not_just_nifty():
+    """The index must come from the data. Hard-coding NIFTY made every SENSEX
+    cycle skip as missing_legs — a wrong answer that looked like thin data."""
+    sc, sp = 80600.0, 79400.0
+    days = {}
+    for day, prices in (
+        (ENTRY, {(sc, Right.CALL): 30.0, (sc + 200, Right.CALL): 12.0,
+                 (sp, Right.PUT): 28.0, (sp - 200, Right.PUT): 10.0}),
+        (EXPIRY, {(sc, Right.CALL): 6.0, (sc + 200, Right.CALL): 1.0,
+                  (sp, Right.PUT): 5.0, (sp - 200, Right.PUT): 1.0}),
+    ):
+        days[day] = [sensex_row(day, k, r, p) for (k, r), p in prices.items()]
+    for d in (date(2026, 7, 16), date(2026, 7, 17), date(2026, 7, 20)):
+        days[d] = [sensex_row(d, sc, Right.CALL, 1.0)]
+
+    s = run(days, CondorParams(offset_pct=0.0075, wing_points=200.0, strike_step=100.0),
+            ZERO, RiskConfig(per_trade_max_loss_rupees=5000.0))
+    assert len(s.trades) == 1
+    assert s.trades[0].lot_size == 20              # SENSEX lot, read from the data
+    assert s.trades[0].credit == 36.0
+
+
+def test_untraded_leg_is_skipped_not_crashed():
+    """traded_only=False rows carry last_traded=None; arithmetic on them raised
+    TypeError before this guard."""
+    days = book(
+        {(SC, Right.CALL): 30.0, (LC, Right.CALL): 12.0,
+         (SP, Right.PUT): 28.0, (LP, Right.PUT): 10.0},
+        {(SC, Right.CALL): 6.0, (LC, Right.CALL): 1.0,
+         (SP, Right.PUT): 5.0, (LP, Right.PUT): 1.0},
+    )
+    # make one entry leg untraded, as fetch_day(traded_only=False) would
+    from dataclasses import replace
+    days[ENTRY] = [replace(r, volume=0) if r.strike == LC else r for r in days[ENTRY]]
+    s = run(days, CondorParams(offset_pct=0.008, wing_points=50.0), ZERO, RISK)
+    assert s.trades == [] and s.skipped["untraded_leg"] == 1
+
+
+def test_mixed_indices_refused():
+    days = {
+        ENTRY: [row(ENTRY, SC, Right.CALL, 30.0),
+                sensex_row(ENTRY, 80600.0, Right.CALL, 30.0)],
+    }
+    with pytest.raises(ValueError, match="mixes indices"):
+        run(days, CondorParams(), ZERO, RISK)

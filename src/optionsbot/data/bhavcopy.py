@@ -71,6 +71,7 @@ class EodRow:
     high: float
     low: float
     close: float
+    last_price: float          # LastPric — survives the expiry-day quirk below
     settlement: float
     underlying: float
     volume: int
@@ -84,17 +85,44 @@ class EodRow:
         return self.volume > 0
 
     @property
+    def _expiry_day_quirk(self) -> bool:
+        """On expiry day both exchanges write the settlement INDEX LEVEL into
+        SttlmPric, and BSE writes it into ClsPric as well. Confirmed on real
+        files: SENSEX 76100CE on 2026-06-18 reported ClsPric and SttlmPric of
+        77,409.98 — the index — while LastPric held the true 1,313.70."""
+        return self.day == self.expiry
+
+    @property
+    def intrinsic(self) -> float:
+        """Value at expiry against the settlement index."""
+        if self.right is Right.CALL:
+            return max(0.0, self.underlying - self.strike)
+        return max(0.0, self.strike - self.underlying)
+
+    @property
     def last_traded(self) -> float | None:
         """The last price someone actually transacted at, or None if the
-        contract did not trade. Achievable by definition, but possibly hours
-        stale by the close on a thin strike."""
-        return self.close if self.traded else None
+        contract did not trade.
+
+        On expiry day `close` may be the index level rather than an option
+        price (BSE always, NSE not observed but not relied upon), so a close
+        indistinguishable from the underlying is rejected in favour of
+        LastPric, then intrinsic value.
+        """
+        if not self.traded:
+            return None
+        if self._expiry_day_quirk and abs(self.close - self.underlying) < 0.01:
+            return self.last_price if self.last_price > 0 else self.intrinsic
+        return self.close
 
     @property
     def mark(self) -> float:
-        """Exchange settlement price — always present, principled, and the
-        correct basis for valuing a held position or settling at expiry. Not
-        necessarily a price anyone could have transacted at.
+        """Valuation basis: settlement price, or intrinsic value on expiry day.
+
+        SttlmPric carries the settlement INDEX LEVEL on expiry day for both
+        exchanges, not the option's value — using it directly would value every
+        expiring contract at the index. On expiry day an option is worth its
+        intrinsic value against that index, which is what is returned.
 
         Deliberately no single `price` property: the two disagree materially
         often enough that the choice must be made explicitly. Measured
@@ -103,6 +131,8 @@ class EodRow:
         single-lot trades and deep-ITM strikes, where the last trade is stale
         while settlement reflects end-of-day fair value.
         """
+        if self._expiry_day_quirk and abs(self.settlement - self.underlying) < 0.01:
+            return self.intrinsic
         return self.settlement
 
     @property
@@ -155,7 +185,7 @@ def _parse(raw: dict, index: str) -> EodRow | None:
         strike=f("StrkPric"),
         right=right,
         open=f("OpnPric"), high=f("HghPric"), low=f("LwPric"), close=f("ClsPric"),
-        settlement=f("SttlmPric"), underlying=f("UndrlygPric"),
+        last_price=f("LastPric"), settlement=f("SttlmPric"), underlying=f("UndrlygPric"),
         volume=int(f("TtlTradgVol")), open_interest=int(f("OpnIntrst")),
         lot_size=int(f("NewBrdLotQty")),
     )
@@ -181,7 +211,7 @@ def fetch_day(index: str, day: date, traded_only: bool = True) -> list[EodRow]:
 
 FIELDS = [
     "day", "index", "expiry", "strike", "right", "open", "high", "low", "close",
-    "settlement", "underlying", "volume", "open_interest", "lot_size",
+    "last_price", "settlement", "underlying", "volume", "open_interest", "lot_size",
 ]
 
 
@@ -193,8 +223,8 @@ def write_csv(rows: list[EodRow], path: Path) -> None:
         for r in rows:
             w.writerow([
                 r.day.isoformat(), r.index, r.expiry.isoformat(), r.strike,
-                r.right.value, r.open, r.high, r.low, r.close, r.settlement,
-                r.underlying, r.volume, r.open_interest, r.lot_size,
+                r.right.value, r.open, r.high, r.low, r.close, r.last_price,
+                r.settlement, r.underlying, r.volume, r.open_interest, r.lot_size,
             ])
 
 
@@ -206,6 +236,7 @@ def read_csv(path: Path) -> list[EodRow]:
                 expiry=date.fromisoformat(r["expiry"]), strike=float(r["strike"]),
                 right=Right(r["right"]), open=float(r["open"]), high=float(r["high"]),
                 low=float(r["low"]), close=float(r["close"]),
+                last_price=float(r.get("last_price", 0) or 0),
                 settlement=float(r["settlement"]), underlying=float(r["underlying"]),
                 volume=int(r["volume"]), open_interest=int(r["open_interest"]),
                 lot_size=int(r["lot_size"]),

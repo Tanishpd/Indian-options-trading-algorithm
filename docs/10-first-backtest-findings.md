@@ -17,12 +17,11 @@ Largest honest sample — 0.8% OTM shorts, 50-point wings, **71 trades over 20 m
 
 | Metric | Value |
 |---|---|
-| Net P&L | **−₹18,591** (−18.6% on ₹1 lakh) |
-| Gross P&L (before costs) | −₹1,776 |
-| Transaction costs | ₹16,816 |
+| Net P&L | **−₹16,740** (−16.7% on ₹1 lakh) |
+| Gross P&L (before costs) | **+₹75** — about ₹1 per trade |
+| Transaction costs | ₹16,815 |
 | Win rate | 42% |
-| Max drawdown | **₹23,453 (23.5%)** — 2–4× the mandated cap |
-| Avg win / avg loss | ₹1,522 / −₹1,567 |
+| Max drawdown | **₹22,591 (22.6%)** — 2–4× the mandated cap |
 
 ## Why it loses — the mechanism, not the noise
 
@@ -34,13 +33,37 @@ Median credit was **29 points on a 50-point wing**, so:
 - **breakeven win rate required: 42%. Actual win rate: 42%.**
 
 The strategy lands exactly on its breakeven point. **Gross P&L before any
-costs is −₹1,776 over 71 trades** — statistically indistinguishable from zero.
-(Zeroing the configurable cost rates leaves −₹3,705, because STT is statutory
-and deliberately hard-coded rather than configurable.)
+costs is +₹75 across 71 trades** — roughly one rupee per trade, on a ₹1 lakh
+account, over twenty months.
 
 **The options are priced efficiently.** The premium collected compensates
 precisely for the risk taken. There is no gross edge to harvest, and
 transaction costs are then pure subtraction from a coin flip.
+
+## Two data traps found while verifying this result
+
+Both were discovered by checking whether the numbers were *arithmetically
+possible*, not by reading documentation. Neither appears in any of the
+thirteen research streams.
+
+**1. Both exchanges write the settlement INDEX LEVEL into `SttlmPric` on
+expiry day**, and BSE writes it into `ClsPric` as well. A real row: SENSEX
+76100CE on 2026-06-18 reported a close and settlement of 77,409.98 — the index
+— while `LastPric` held the true 1,313.70. Valuing expiring contracts from
+those fields prices every option at the index level. The ingester now detects
+this and falls back to `LastPric`, then to intrinsic value.
+
+**2. Last-traded prices are non-synchronous, and differencing them breaks
+arithmetic bounds.** A condor spread cannot be worth more than its wing width
+at expiry, yet 24 of 71 cycles produced exit values that exceeded it — one at
+59.7 points on a 50-point wing, because both calls last printed ~65 points
+below intrinsic at different moments. The study now settles at intrinsic value
+against the settlement index, which is both correct and bounded. Zero breaches
+remain.
+
+This is the concrete form of a limitation the research anticipated in the
+abstract: end-of-day fields are not a coherent snapshot of a multi-leg
+structure at a single instant.
 
 ## Two structural constraints this exposed
 

@@ -110,7 +110,15 @@ def run(
     """One condor per expiry cycle, entered and exited at closing prices."""
     days = sorted(by_day)
     trades: list[Trade] = []
-    skipped = {"no_entry_day": 0, "missing_legs": 0, "over_cap": 0, "no_exit": 0}
+    skipped = {"no_entry_day": 0, "missing_legs": 0, "over_cap": 0, "no_exit": 0,
+               "untraded_leg": 0}
+
+    indices = {r.index for rows in by_day.values() for r in rows}
+    if len(indices) > 1:
+        raise ValueError(
+            f"by_day mixes indices {sorted(indices)}; run one index at a time so "
+            "strike steps, lot sizes and spot levels are not conflated"
+        )
 
     expiries = sorted({r.expiry for rows in by_day.values() for r in rows})
     for expiry in expiries:
@@ -128,14 +136,16 @@ def run(
             skipped["no_entry_day"] += 1
             continue
 
-        spot = next(iter(entry_rows.values())).underlying
+        first = next(iter(entry_rows.values()))
+        spot = first.underlying
+        index = first.index          # EodRow.key carries the real index
         sc = _round_strike(spot * (1 + params.offset_pct), params.strike_step)
         sp = _round_strike(spot * (1 - params.offset_pct), params.strike_step)
         lc, lp = sc + params.wing_points, sp - params.wing_points
 
         legs = [(sc, Right.CALL, Side.SELL), (lc, Right.CALL, Side.BUY),
                 (sp, Right.PUT, Side.SELL), (lp, Right.PUT, Side.BUY)]
-        keys = [("NIFTY", expiry, k, r) for k, r, _ in legs]
+        keys = [(index, expiry, k, r) for k, r, _ in legs]
         entry = [entry_rows.get(k) for k in keys]
         exit_ = [exit_rows.get(k) for k in keys]
         if any(e is None for e in entry):
@@ -144,15 +154,25 @@ def run(
         if any(e is None for e in exit_):
             skipped["no_exit"] += 1
             continue
+        # Untraded contracts have no achievable price. The ingester drops them
+        # by default, but a caller passing traded_only=False would otherwise
+        # reach arithmetic on None.
+        if any(e.last_traded is None for e in (*entry, *exit_)):
+            skipped["untraded_leg"] += 1
+            continue
 
         lot = entry[0].lot_size
         credit = sum(
             (row.last_traded if side is Side.SELL else -row.last_traded)
             for row, (_, _, side) in zip(entry, legs)
         )
-        # Cost to close: buy back the shorts, sell the wings.
+        # Value at expiry is INTRINSIC against the settlement index, not the
+        # last traded price. The four legs last trade at different moments, so
+        # differencing stale quotes produces spread values that violate the
+        # arithmetic bound: one 2024-12-05 cycle showed a 59.7-point exit on a
+        # 50-point wing, because both calls last printed well below intrinsic.
         exit_cost = sum(
-            (row.last_traded if side is Side.SELL else -row.last_traded)
+            (row.mark if side is Side.SELL else -row.mark)
             for row, (_, _, side) in zip(exit_, legs)
         )
         worst_case = (params.wing_points - credit) * lot
@@ -163,9 +183,11 @@ def run(
         total_costs = 0.0
         for row, (_, _, side) in zip(entry, legs):
             total_costs += _leg_costs(entry_day, side, row.last_traded, lot, costs)
+        # Exit costs are charged as if squaring off, which is conservative: a
+        # cash settlement would avoid the brokerage but incur exercise STT,
+        # whose mechanics this project treats as unverified (docs/05).
         for row, (_, _, side) in zip(exit_, legs):
-            closing = side.opposite
-            total_costs += _leg_costs(expiry, closing, row.last_traded, lot, costs)
+            total_costs += _leg_costs(expiry, side.opposite, row.mark, lot, costs)
 
         gross = (credit - exit_cost) * lot
         trades.append(Trade(
