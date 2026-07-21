@@ -428,3 +428,46 @@ def test_entry_refused_when_quoted_credit_exceeds_the_wing():
     orders = s.decide(ctx(ENTRY_TIME, chain_quotes(sc=80, lc=25, sp=80, lp=25)))
     assert orders == [] and s.phase == "idle"
     assert any("non-synchronous quotes" in m for m in s.log)
+
+
+def depth_quotes(**legs):
+    """Chain with real depth: (ltp, bid, ask) per leg."""
+    q = {}
+    for name, (ltp, bid, ask) in legs.items():
+        strike, right = {"sc": (SC, Right.CALL), "lc": (LC, Right.CALL),
+                         "sp": (SP, Right.PUT), "lp": (LP, Right.PUT)}[name]
+        q[key(strike, right)] = Quote(ltp=ltp, bid=bid, ask=ask)
+    return q
+
+
+def test_exit_triggers_mark_where_the_exit_order_must_trade():
+    """A short is bought back at the ask and a long sold at the bid, so that is
+    where the trigger has to read. Marking at LTP fired the stop on a price the
+    exit could not obtain — on a wide book the gap was Rs 393 against a Rs 1,690
+    max loss, a fifth of the risk budget the stop exists to govern.
+
+    These quotes are built so the two readings disagree: at the touch the book
+    is down Rs 1,202 (past the Rs 1,014 stop); at LTP it looks like Rs 585."""
+    chain = depth_quotes(sc=(42.0, 40.0, 48.0), lc=(10.0, 8.0, 12.0),
+                         sp=(2.0, 1.0, 3.0), lp=(1.0, 0.5, 1.5))
+    s = strategy()
+    s.phase = "holding"
+    s.targets = [{"strike": SC, "right": "CE", "side": "SELL"}]
+    orders = s.decide(ctx(datetime(2026, 7, 10, 11, 0), chain, positions=full_book()))
+    assert s.phase == "exiting" and len(orders) == 4
+    assert any("stop: loss Rs 1,202" in m for m in s.log)
+
+
+def test_log_does_not_grow_without_bound_on_a_stuck_condition():
+    """The guard paths repeat identically for as long as their condition holds
+    and nothing drains this list; 500 ticks once produced 500 identical lines."""
+    flat = full_book(sc=10.0, lc=10.0, sp=10.0, lp=10.0)      # credit Rs 0
+    s = ReferenceCondor(params=CondorParams(),
+                        risk=RiskConfig(per_trade_max_loss_rupees=5000.0))
+    s.phase = "holding"
+    s.targets = [{"strike": SC, "right": "CE", "side": "SELL"}]
+    for _ in range(500):
+        s.decide(ctx(datetime(2026, 7, 10, 11, 0),
+                     chain_quotes(sc=10, lc=10, sp=10, lp=10), positions=flat))
+    assert len(s.log) == 1                                    # repeats collapse
+    assert any("no stop basis" in m for m in s.log)

@@ -54,6 +54,22 @@ class CondorParams:
     max_pad_mult: float = 5.0
 
 
+_MAX_LOG = 500          # retained decision lines; the loop runs for months
+
+
+def _touch(q, side: Side) -> float:
+    """The price this side must actually reach: ask to buy, bid to sell.
+
+    LTP only when the feed gives no depth. Every decision that will be followed
+    by an order goes through here, so a trigger is never evaluated on a price
+    the resulting order cannot obtain — marking exits at LTP while executing at
+    the touch understated the cost to close by Rs 393 on a book with a Rs 1,690
+    max loss, a fifth of the risk budget the stop is meant to govern.
+    """
+    px = getattr(q, "ask" if side is Side.BUY else "bid", None)
+    return float(px) if px else q.ltp
+
+
 def _round_strike(value: float, step: float) -> float:
     return round(value / step) * step
 
@@ -81,7 +97,19 @@ class ReferenceCondor:
     # -- helpers ---------------------------------------------------------
 
     def _say(self, msg: str) -> None:
+        """Record a decision, without letting a stuck condition fill memory.
+
+        The per-tick guard paths ("no stop basis", "ignoring unpriceable tick")
+        repeat identically for as long as their condition holds, and nothing in
+        the process drains this list — 500 ticks of one stuck condition produced
+        500 identical entries. Consecutive repeats collapse, and the list is
+        capped, so the session keeps its recent history bounded.
+        """
+        if self.log and self.log[-1] == msg:
+            return
         self.log.append(msg)
+        if len(self.log) > _MAX_LOG:
+            del self.log[: len(self.log) - _MAX_LOG]
 
     def _reset(self) -> None:
         self.phase = "idle"
@@ -97,10 +125,7 @@ class ReferenceCondor:
         q = ctx.chain.get(leg.key)
         if q is None:
             return None
-        # Price from the side that must be reached (ask to buy, bid to sell),
-        # then pad past it; LTP only when the feed gives no depth.
-        touch = getattr(q, "ask" if leg.side is Side.BUY else "bid", None)
-        base = float(touch) if touch else q.ltp
+        base = _touch(q, leg.side)
         pad = 1 + self._pad() if leg.side is Side.BUY else 1 - self._pad()
         return Order(leg, to_tick(base * pad, leg.side))
 
@@ -185,14 +210,9 @@ class ReferenceCondor:
             self._say("entry skipped: missing quotes")
             return []
 
-        # Estimate the credit at prices actually obtainable (sell into the
-        # bid, buy at the ask) so the per-trade cap check is not optimistic.
-        def touch(leg, q):
-            side_px = getattr(q, "bid" if leg.side is Side.SELL else "ask", None)
-            return float(side_px) if side_px else q.ltp
-
+        # Credit at prices actually obtainable, so the cap check is not optimistic.
         credit = sum(
-            (touch(leg, q) if leg.side is Side.SELL else -touch(leg, q))
+            (_touch(q, leg.side) if leg.side is Side.SELL else -_touch(q, leg.side))
             for leg, q in zip(legs, quotes)
         )
         # A condor cannot be sold for more than its wing width, or for nothing.
@@ -291,7 +311,13 @@ class ReferenceCondor:
         quotes = [ctx.chain.get(p_.leg.key) for p_ in book]
         if any(q is None for q in quotes):
             return  # can't price an exit this tick
-        pnl = sum((q.ltp - p_.entry_price) * p_.net for p_, q in zip(book, quotes))
+        # Mark each leg where its EXIT order must trade: a short is bought back
+        # at the ask, a long is sold at the bid. Marking at LTP made the trigger
+        # fire on a price the exit could not get (finding F8, docs/11).
+        pnl = sum(
+            (_touch(q, Side.BUY if p_.net < 0 else Side.SELL) - p_.entry_price) * p_.net
+            for p_, q in zip(book, quotes)
+        )
 
         # A defined-risk structure cannot be worth less than -worst or more than
         # the credit taken. Outside that, the four legs last printed at different

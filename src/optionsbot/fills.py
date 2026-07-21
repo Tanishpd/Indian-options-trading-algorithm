@@ -14,8 +14,14 @@ TICK_SIZE = 0.05  # NSE/BSE option tick — limits off this grid are exchange-in
 
 
 def to_tick(price: float, side: Side, tick: float = TICK_SIZE) -> float:
-    """Snap a limit price onto the exchange tick grid, conservatively:
-    BUY rounds up, SELL rounds down (never better than intended)."""
+    """Snap a limit price onto the exchange tick grid.
+
+    BUY rounds up, SELL rounds down — never a better price than intended, with
+    one exception: a positive price below one tick returns one tick, because
+    nothing below that is quotable. That is the only case where the result can
+    sit on the far side of the reference, and it is preferred to the
+    alternative, which is emitting an invalid limit of 0.00.
+    """
     import math
 
     steps = price / tick

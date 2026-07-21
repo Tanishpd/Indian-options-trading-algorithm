@@ -147,15 +147,14 @@ def _quote(chain: dict, expiry: date, legs: list[tuple[float, Right, Side]]
     return bars
 
 
-def _credit(bars: list[Bar], legs: list[tuple[float, Right, Side]]) -> float:
-    """Net premium per share: positive when the structure is sold for a credit."""
-    return sum(
-        (b.ltp if side is Side.SELL else -b.ltp) for b, (_, _, side) in zip(bars, legs)
-    )
+def _structure_price(bars: list[Bar], legs: list[tuple[float, Right, Side]]) -> float:
+    """Net premium per share of the structure as quoted.
 
-
-def _cost_to_close(bars: list[Bar], legs: list[tuple[float, Right, Side]]) -> float:
-    """Per share to unwind: buy back the shorts, sell the wings."""
+    One function, because entering and unwinding price the same thing: at entry
+    it is the credit received, mid-trade it is the cost to close. They were two
+    byte-identical functions, which meant any correction to leg-sign handling
+    had to be made twice or the two ends would silently disagree.
+    """
     return sum(
         (b.ltp if side is Side.SELL else -b.ltp) for b, (_, _, side) in zip(bars, legs)
     )
@@ -213,15 +212,18 @@ def run_expiry(
             quoted = _quote(chain, expiry, legs)
             if quoted is None:
                 continue                                  # not all legs tradeable
-            credit = _credit(quoted, legs) - 4 * params.slippage_per_leg
-            if not _within_bound(credit, params.wing_points):
+            # Bound-check what the MARKET quoted, before modelled costs are
+            # applied. A credit above the wing width is free money and cannot
+            # occur; it means the four legs printed at different instants.
+            # Testing the post-slippage figure instead let a raw credit of 51 on
+            # a 50-point wing pass as 50 — slippage laundering an impossible
+            # price into an acceptable one. Leaving entry unchecked was worse
+            # than leaving both ends unchecked: an inflated credit puts the stop
+            # threshold above the wing, so the position runs unstopped to a
+            # settled exit that books a guaranteed profit.
+            if not _within_bound(_structure_price(quoted, legs), params.wing_points):
                 continue
-            # A credit above the wing width is free money and cannot occur; it
-            # means the four legs printed at different instants. Exits are bound-
-            # checked below, and leaving entry unchecked was worse than leaving
-            # both unchecked: an inflated credit puts the stop threshold above
-            # the wing, so the position runs unstopped to a settled exit that
-            # books a guaranteed profit. Every such cycle is fabricated.
+            credit = _structure_price(quoted, legs) - 4 * params.slippage_per_leg
             if credit <= 0:
                 continue
             if credit < params.min_credit_frac * params.wing_points:
@@ -240,12 +242,16 @@ def run_expiry(
             if not must_close:
                 continue                                  # cannot price an exit yet
             value = _intrinsic_value(next(iter(chain.values())).spot, legs)
+            value += 4 * params.slippage_per_leg
         else:
-            value = _cost_to_close(quoted, legs) + 4 * params.slippage_per_leg
-            if not _within_bound(value, params.wing_points):
+            quoted_value = _structure_price(quoted, legs)
+            if not _within_bound(quoted_value, params.wing_points):
                 if not must_close:
                     continue                              # non-synchronous prints
                 value = _intrinsic_value(next(iter(chain.values())).spot, legs)
+                value += 4 * params.slippage_per_leg
+            else:
+                value = quoted_value + 4 * params.slippage_per_leg
 
         # Stop checked first: when both conditions hold in one minute, booking
         # the loss is the conservative reading.
@@ -286,7 +292,10 @@ def run_expiry(
     entered_at, entry_bars, legs, credit = entry
     last_ts = max(minutes)
     spot = next(iter(minutes[last_ts].values())).spot
-    value = _intrinsic_value(spot, legs)
+    # Slippage applies here too. Charging it at entry and not at this exit
+    # flattered precisely the maximum-loss cycles, which is what this path
+    # exists to stop discarding.
+    value = _intrinsic_value(spot, legs) + 4 * params.slippage_per_leg
     total = 0.0
     for b, (_, _, side) in zip(entry_bars, legs):
         total += _fill_costs(entered_at.date(), side, b.ltp, lot_size, costs)

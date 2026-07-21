@@ -264,6 +264,14 @@ Known limitations, documented rather than smoothed over:
 
 ## Reproducing
 
+```
+python -m optionsbot.research.run_intraday data/intraday/NIFTY --targets 0.50 --stops 0.60
+```
+
+reproduces the headline table exactly. Every figure in this document comes from
+that runner; the first version of these findings was produced by a throwaway
+script, which is not evidence anyone can audit.
+
 The study module is [`src/optionsbot/research/intraday_condor.py`](../src/optionsbot/research/intraday_condor.py);
 its correctness rules are documented in the module docstring, and each one exists
 because violating it fabricates money. The hand-computed test literals are in

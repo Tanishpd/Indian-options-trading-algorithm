@@ -247,3 +247,54 @@ def test_slippage_default_is_modelled_not_zero():
     honest run the one you had to remember to ask for, and cost ~Rs 12,000 of
     optimism in the first published figure (docs/11)."""
     assert IntradayParams().slippage_per_leg > 0.0
+
+
+# -- slippage ---------------------------------------------------------------
+# The default is non-zero, so these paths are the ones that actually run.
+
+SLIP = IntradayParams(offset_pct=0.008, wing_points=50.0, slippage_per_leg=0.25)
+
+
+def test_slippage_is_charged_on_both_ends():
+    """Round trip is 8 legs: entry credit is reduced and exit cost raised, each
+    by 4 x the per-leg figure."""
+    # Slippage cuts the credit to 19, which moves the target to 9.5 -- so the
+    # exit that cleared a frictionless 10.0 threshold no longer does. The cost
+    # is charged on the trigger, not just on the P&L.
+    bars = ENTRY + minute(at(16, 10, 1), 6.0, 2.0, 5.0, 3.0)   # market value 6.0
+    trade, _ = run_expiry(bars, EXPIRY, LOT, SLIP, ZERO, RISK)
+    assert trade.exit_reason == "target"
+    assert trade.credit == 19.0            # 20 - 4 x 0.25
+    assert trade.exit_cost == 7.0          # 6 + 4 x 0.25
+    assert trade.gross == (19.0 - 7.0) * LOT
+
+
+def test_settled_exit_pays_slippage_too():
+    """Charging it at entry and not at settlement flattered exactly the
+    maximum-loss cycles, which is what the settled path exists to preserve."""
+    hold = minute(at(16, 10, 1), 30.0, 20.0, 28.0, 18.0, spot=25400.0)
+    trade, _ = run_expiry(ENTRY + hold, EXPIRY, LOT, SLIP, ZERO, RISK)
+    assert trade.exit_reason == "settled"
+    assert trade.exit_cost == pytest.approx(51.0)     # 50 intrinsic + 4 x 0.25
+    assert trade.gross == pytest.approx((19.0 - 51.0) * LOT)
+
+
+def test_bound_is_tested_on_the_market_price_not_the_modelled_one():
+    """Slippage is a modelled cost, not a price. Adding it before the bound
+    check rejected legitimate near-maximum-loss exits -- precisely where the
+    stop has to fire -- and subtracting it at entry laundered an impossible
+    credit into an acceptable one."""
+    # True cost to close 49.0: legal, and past the stop. With slippage added
+    # first it reads 50.0 and would be refused as non-synchronous.
+    bars = ENTRY + minute(at(16, 10, 1), 45.0, 1.0, 6.0, 1.0)   # 45+6-1-1 = 49
+    trade, _ = run_expiry(bars, EXPIRY, LOT, SLIP, ZERO, RISK)
+    assert trade.exit_reason == "stop"
+    assert trade.exit_cost == pytest.approx(50.0)     # 49 market + 4 x 0.25
+
+    # Entry: a raw credit of 51 exceeds the wing and must be refused, even
+    # though subtracting slippage would bring it to an acceptable 50.
+    rich = minute(ENTRY_TS, 60.0, 5.0, 1.0, 5.0)      # 60+1-5-5 = 51
+    later = minute(at(16, 10, 5), 30.0, 20.0, 28.0, 18.0)
+    exitm = minute(at(16, 10, 6), 8.0, 2.0, 6.0, 3.0)
+    trade, _ = run_expiry(rich + later + exitm, EXPIRY, LOT, SLIP, ZERO, RISK)
+    assert trade.entered_at == at(16, 10, 5)          # skipped the bad print
