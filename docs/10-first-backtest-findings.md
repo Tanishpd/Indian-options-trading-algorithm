@@ -21,7 +21,7 @@ Largest honest sample — 0.8% OTM shorts, 50-point wings, **71 trades over 20 m
 | Gross P&L (before costs) | **+₹75** — about ₹1 per trade |
 | Transaction costs | ₹16,815 |
 | Win rate | 42% |
-| Max drawdown | **₹22,591 (22.6%)** — 2–4× the mandated cap |
+| Max drawdown | ₹22,591 (22.6%) — but see the note below |
 
 ## Why it loses — the mechanism, not the noise
 
@@ -36,9 +36,30 @@ The strategy lands exactly on its breakeven point. **Gross P&L before any
 costs is +₹75 across 71 trades** — roughly one rupee per trade, on a ₹1 lakh
 account, over twenty months.
 
-**The options are priced efficiently.** The premium collected compensates
-precisely for the risk taken. There is no gross edge to harvest, and
-transaction costs are then pure subtraction from a coin flip.
+> **CORRECTED (see [docs/12](12-where-the-edge-actually-is.md)).** This section
+> originally concluded that *"the options are priced efficiently — there is no
+> gross edge to harvest."* **That is wrong.** Measuring implied volatility at
+> entry against subsequently realised volatility gives a variance risk premium of
+> **+2.08 volatility points (t = 2.95, 95% CI [+0.70, +3.46], IV > RV in 53 of 71
+> cycles)**. NIFTY options *are* systematically overpriced.
+>
+> The correct mechanism is that the premium is real but **the same size as the
+> cost floor**: 2.08 points × ₹115.4 of condor short vega = ₹240 gross against a
+> ₹226 round trip, or **+₹14 per trade**. Costs are not "pure subtraction from a
+> coin flip" — they are subtraction from a genuine but tiny edge. 20% a year
+> requires a premium of **5.4 volatility points**; the market offers 2.08.
+>
+> This distinction decides what to do next: "no edge exists" and "the edge is too
+> small for ₹1 lakh" have completely different implications.
+
+> **CORRECTED drawdown framing ([docs/12](12-where-the-edge-actually-is.md)).**
+> The drawdown is *not* an independent failure alongside the negative return. It
+> is a consequence of the negative mean. Bootstrapping this same per-trade
+> distribution, shifted only so the strategy earns 20%/yr and keeping its exact
+> variance, gives a median 1-year drawdown of **3.4%** and **P(drawdown ≤ 10%) =
+> 99.7%**. The variance is entirely compatible with the cap. There is one problem
+> — the mean — not two, and the risk architecture should not be redesigned in
+> response to these results.
 
 ## Two data traps found while verifying this result
 
@@ -141,16 +162,30 @@ designed to rule out, reproduced under a rule that was supposed to eliminate it.
 **Conclusion: no volatility-timing edge is detectable in this strategy family on
 this data.**
 
+> **Method note ([docs/12](12-where-the-edge-actually-is.md)).** The test above is
+> weaker than it should be: an *absolute* credit-as-%-of-wing threshold conflates
+> IV level with DTE and moneyness, and sweeping thresholds invites overfitting. A
+> competent seller filters on **IV rank**, not an absolute level. That better test
+> was subsequently run on minute data — Black-Scholes ATM IV, expanding-window IV
+> rank with no look-ahead, walk-forward — and **fails harder**: correlation with
+> gross P&L is −0.016, which kills every possible threshold at once without
+> sweeping any. The conclusion stands; the reasoning behind it is now sound.
+
 ## Bearing on the mandate
 
 The target is 20–25% annually with a 5–10% maximum drawdown. This
-configuration returned **−18.6% with a 23.5% drawdown** — failing both, on real
-prices, with honest costs.
+configuration returned **−18.6% with a 23.5% drawdown**, on real prices with
+honest costs.
 
 That does not close the question, but it does relocate it. The burden is no
 longer "which parameters?" but "**where is the edge, and what evidence supports
 it?**" — precisely the standard RESEARCH.md rule 5 sets, now applied to our own
 work rather than to a vendor's claims.
+
+**That question has since been answered: [docs/12](12-where-the-edge-actually-is.md).**
+The edge is the variance risk premium, it is real and statistically significant at
++2.08 volatility points, and it is 2.6× too small to fund this mandate at ₹1 lakh —
+where flat per-order brokerage alone consumes 8.2% a year.
 
 ## Reproduce
 

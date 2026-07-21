@@ -34,13 +34,25 @@ per leg of slippage, on ₹1,00,000:
 | **As the bot runs it** (per-trade cap on) | 57 | **−₹12,745** | +₹369 | ₹13,114 | **₹12,745** |
 | **All 72 cycles** (cap not filtering entry) | 72 | **−₹21,066** | −₹4,828 | ₹16,237 | **₹21,066** |
 
-Drawdown is **12.7%** on the first line and **21.1%** on the second — two to four
-times the mandated 5–10% cap, the same failure mode as
-[docs/10](10-first-backtest-findings.md).
+Drawdown is 12.7% on the first line and 21.1% on the second.
+
+> **CORRECTED framing ([docs/12](12-where-the-edge-actually-is.md)).** This
+> originally read "two to four times the mandated cap, the same failure mode as
+> docs/10", presenting the drawdown as a second, independent failure. It is not —
+> it is a consequence of the negative mean. Bootstrapping this same per-trade
+> distribution, shifted only so the strategy earns 20%/yr and keeping its exact
+> variance, gives a median 1-year drawdown of **3.4%** and **P(drawdown ≤ 10%) =
+> 99.7%**. There is one problem, the mean, not two. The risk framework is sound
+> and should not be redesigned in response to these results.
 
 **Gross is roughly zero in the first row and negative in the second.** That is
 the whole finding: the apparent edge is smaller than the bid/ask spread it has to
 cross eight times.
+
+This is *not* because the options are efficiently priced. They are not — the
+measured variance risk premium is **+2.08 volatility points (t = 2.95)**, worth
+about ₹240 per condor against a ₹226 cost floor. The edge is real and the same
+size as the cost. See [docs/12](12-where-the-edge-actually-is.md).
 
 Read the second row as the honest one. The gap between the two is not the
 strategy performing better under a risk control — it is the per-trade cap acting
@@ -243,8 +255,10 @@ Known limitations, documented rather than smoothed over:
 
 1. **Do not go live with this strategy.** Two independent studies on two
    independent datasets now agree: hold-to-expiry (docs/10) and
-   intraday-triggered (here). Neither shows an edge; both breach the drawdown cap
-   by 2–4×.
+   intraday-triggered (here). Neither monetises the edge that exists
+   ([docs/12](12-where-the-edge-actually-is.md)): the variance risk premium is
+   real at +2.08 volatility points but worth ₹240 against a ₹226 cost floor, and
+   20%/yr would require 5.4 points.
 2. **The cost floor is the binding problem, not the parameters.** ₹227 per round
    trip on a structure whose median credit is 28 points (₹1,820 at lot 65) means
    costs eat 12% of maximum theoretical profit before any market risk. A 3×3
