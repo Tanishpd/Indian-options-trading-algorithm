@@ -12,12 +12,13 @@ import time
 from datetime import date
 from pathlib import Path
 
+from ..calendar import SUPPORTED_INDICES
 from .bhavcopy import NoDataForDate, daterange, fetch_day, write_csv
 
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="Download free NSE/BSE EOD option data")
-    ap.add_argument("--index", default="NIFTY", choices=["NIFTY", "SENSEX"])
+    ap.add_argument("--index", default="NIFTY", choices=SUPPORTED_INDICES)
     ap.add_argument("--from", dest="start", required=True, help="YYYY-MM-DD")
     ap.add_argument("--to", dest="end", required=True, help="YYYY-MM-DD")
     ap.add_argument("--out", default="data/eod", help="output directory")
@@ -39,7 +40,10 @@ def main() -> None:
         try:
             rows = fetch_day(args.index, day, traded_only=not args.keep_untraded)
         except NoDataForDate:
+            # Pace skips too: a --to that runs into the future 404s on every
+            # weekday, which without this is a burst of back-to-back requests.
             skipped += 1
+            time.sleep(args.pause)
             continue
         write_csv(rows, path)
         got += 1

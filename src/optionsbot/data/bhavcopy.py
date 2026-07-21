@@ -32,7 +32,7 @@ from datetime import date, timedelta
 from pathlib import Path
 from typing import Iterator
 
-from ..calendar import SUPPORTED_INDICES, check_index
+from ..calendar import check_index
 from ..costs import ensure_supported_date
 from ..instruments import Right
 

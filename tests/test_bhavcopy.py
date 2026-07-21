@@ -117,3 +117,31 @@ def test_csv_roundtrip(tmp_path):
 def test_daterange_skips_weekends():
     days = list(bc.daterange(date(2026, 7, 17), date(2026, 7, 21)))   # Fri..Tue
     assert days == [date(2026, 7, 17), date(2026, 7, 20), date(2026, 7, 21)]
+
+
+def test_cli_paces_skipped_days(tmp_path, monkeypatch):
+    """A --to that runs into the future 404s on every weekday; without pacing
+    those become a burst of back-to-back requests at the exchange."""
+    import sys
+
+    from optionsbot.data import __main__ as cli
+
+    slept = []
+    monkeypatch.setattr(cli.time, "sleep", slept.append)
+    monkeypatch.setattr(cli, "fetch_day",
+                        lambda *a, **k: (_ for _ in ()).throw(bc.NoDataForDate("future")))
+    monkeypatch.setattr(sys, "argv", [
+        "prog", "--index", "NIFTY", "--from", "2026-07-20", "--to", "2026-07-24",
+        "--out", str(tmp_path), "--pause", "0.25",
+    ])
+    cli.main()
+    assert slept == [0.25] * 5              # one pause per weekday attempted
+
+
+def test_cli_universe_matches_the_calendar_lock():
+    from optionsbot.calendar import SUPPORTED_INDICES
+    from optionsbot.data import __main__ as cli
+
+    src = open(cli.__file__).read()
+    assert "choices=SUPPORTED_INDICES" in src      # not a duplicated literal
+    assert set(SUPPORTED_INDICES) == {"NIFTY", "SENSEX"}
