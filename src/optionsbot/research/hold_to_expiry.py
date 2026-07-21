@@ -34,6 +34,7 @@ class CondorParams:
     wing_points: float = 200.0     # wing distance from each short
     entry_days_before: int = 4     # trading days before expiry to enter
     strike_step: float = 50.0
+    min_credit_frac: float = 0.0   # skip unless credit >= this share of wing width
 
 
 @dataclass(frozen=True)
@@ -60,6 +61,10 @@ class Trade:
 class Study:
     trades: list[Trade]
     skipped: dict[str, int]
+
+    @property
+    def total_cycles(self) -> int:
+        return len(self.trades) + sum(self.skipped.values())
 
     @property
     def net(self) -> float:
@@ -111,7 +116,7 @@ def run(
     days = sorted(by_day)
     trades: list[Trade] = []
     skipped = {"no_entry_day": 0, "missing_legs": 0, "over_cap": 0, "no_exit": 0,
-               "untraded_leg": 0}
+               "untraded_leg": 0, "credit_too_thin": 0}
 
     indices = {r.index for rows in by_day.values() for r in rows}
     if len(indices) > 1:
@@ -175,6 +180,14 @@ def run(
             (row.mark if side is Side.SELL else -row.mark)
             for row, (_, _, side) in zip(exit_, legs)
         )
+        # Volatility filter: require the credit to be a minimum share of the
+        # wing width. Applied to EVERY cycle as an explicit rule, so that a
+        # surviving edge cannot be the risk cap's selection artifact in
+        # disguise (docs/10).
+        if credit < params.min_credit_frac * params.wing_points:
+            skipped["credit_too_thin"] += 1
+            continue
+
         worst_case = (params.wing_points - credit) * lot
         if worst_case > risk.per_trade_max_loss_rupees:
             skipped["over_cap"] += 1

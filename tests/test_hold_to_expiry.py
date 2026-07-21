@@ -160,3 +160,36 @@ def test_mixed_indices_refused():
     }
     with pytest.raises(ValueError, match="mixes indices"):
         run(days, CondorParams(), ZERO, RISK)
+
+
+def test_credit_filter_skips_thin_cycles():
+    """The IV filter must apply to every cycle as an explicit rule, not emerge
+    as a side-effect of the risk cap (docs/10)."""
+    days = book(
+        {(SC, Right.CALL): 12.0, (LC, Right.CALL): 6.0,
+         (SP, Right.PUT): 11.0, (LP, Right.PUT): 5.0},          # credit 12 on a 50-pt wing
+        {(SC, Right.CALL): 1.0, (LC, Right.CALL): 0.5,
+         (SP, Right.PUT): 1.0, (LP, Right.PUT): 0.5},
+    )
+    # Cap raised so the filter is what is under test: worst case here is
+    # (50 - 12) * 65 = Rs 2,470, which the default Rs 2,000 cap would block.
+    wide = RiskConfig(per_trade_max_loss_rupees=3000.0)
+
+    loose = run(days, CondorParams(offset_pct=0.008, wing_points=50.0,
+                                   min_credit_frac=0.20), ZERO, wide)
+    assert len(loose.trades) == 1                                # 12 >= 20% of 50
+
+    strict = run(days, CondorParams(offset_pct=0.008, wing_points=50.0,
+                                    min_credit_frac=0.50), ZERO, wide)
+    assert strict.trades == [] and strict.skipped["credit_too_thin"] == 1
+
+
+def test_total_cycles_accounts_for_every_expiry():
+    days = book(
+        {(SC, Right.CALL): 30.0, (LC, Right.CALL): 12.0,
+         (SP, Right.PUT): 28.0, (LP, Right.PUT): 10.0},
+        {(SC, Right.CALL): 6.0, (LC, Right.CALL): 1.0,
+         (SP, Right.PUT): 5.0, (LP, Right.PUT): 1.0},
+    )
+    s = run(days, CondorParams(offset_pct=0.008, wing_points=50.0), ZERO, RISK)
+    assert s.total_cycles == len(s.trades) + sum(s.skipped.values())
