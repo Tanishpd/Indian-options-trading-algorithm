@@ -38,19 +38,19 @@ account, over twenty months.
 
 > **CORRECTED (see [docs/12](12-where-the-edge-actually-is.md)).** This section
 > originally concluded that *"the options are priced efficiently — there is no
-> gross edge to harvest."* **That is wrong.** Measuring implied volatility at
-> entry against subsequently realised volatility gives a variance risk premium of
-> **+2.08 volatility points (t = 2.95, 95% CI [+0.70, +3.46], IV > RV in 53 of 71
-> cycles)**. NIFTY options *are* systematically overpriced.
+> gross edge to harvest."* **That is wrong, twice over.**
 >
-> The correct mechanism is that the premium is real but **the same size as the
-> cost floor**: 2.08 points × ₹115.4 of condor short vega = ₹240 gross against a
-> ₹226 round trip, or **+₹14 per trade**. Costs are not "pure subtraction from a
-> coin flip" — they are subtraction from a genuine but tiny edge. 20% a year
-> requires a premium of **5.4 volatility points**; the market offers 2.08.
+> The variance risk premium is real and large: **+1.96 volatility points at 2 DTE
+> (t = +3.76, positive in 74% of 72 cycles)**, worth **₹1,700–2,400 per cycle**
+> against a ₹230 cost floor — roughly ten times what it costs to trade.
 >
-> This distinction decides what to do next: "no edge exists" and "the edge is too
-> small for ₹1 lakh" have completely different implications.
+> The reason we captured none of it is that **the entire premium is tail
+> insurance**. Estimator-free, from prices alone: a short ATM straddle earns
+> +₹1,722/cycle and the ±500 strangle *inside* it earns +₹1,750, so everything
+> within ±500 points of ATM is worth **+₹48**. A defined-risk structure is short
+> the near strikes and long the far ones — **a net *buyer* of the only part of the
+> surface that pays.** We were not failing to harvest the premium; we were paying
+> it. That is arithmetic, not a parameter failure.
 
 > **CORRECTED drawdown framing ([docs/12](12-where-the-edge-actually-is.md)).**
 > The drawdown is *not* an independent failure alongside the negative return. It

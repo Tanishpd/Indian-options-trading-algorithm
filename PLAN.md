@@ -50,22 +50,36 @@ reading both findings documents first.**
 | [docs/11](docs/11-intraday-backtest-findings.md) | Minute bars, 72 cycles, 17 months | net −₹21,066, gross −₹4,828, max DD 21.1% |
 
 **Why**, established in [docs/12](docs/12-where-the-edge-actually-is.md): the
-variance risk premium is **real and significant at +2.08 volatility points
-(t = 2.95)** — options are not efficiently priced — but it is worth ~₹240 per
-condor against a ₹226 cost floor. 20%/yr requires **5.4 points**. Flat per-order
-brokerage alone consumes **8.2%/yr** of a ₹1 lakh account, and even at unlimited
-capital this structure ceilings around **+10.3%**.
+variance risk premium is **real and large** — +1.96 volatility points at 2 DTE
+(t = +3.76), worth ₹1,700–2,400 per cycle against a ₹230 cost floor. Options are
+not efficiently priced. But **the entire premium is tail insurance**: everything
+within ±500 points of ATM is worth +₹48/cycle, and a defined-risk structure is
+short the near strikes and long the far ones — a net *buyer* of the only part of
+the surface that pays.
 
-**Pre-commitment before any further work on premium selling**: measure the VRP on
-~4 years of NIFTY EOD history. **If its 95% upper bound is below 5.4 volatility
-points, the mandate is dead structurally and no further parameter search is
-justified.**
+The cap cannot reach the tail. NIFTY's minimum risk unit is 50pt × lot 65 =
+**₹3,250, already above the ₹2,000 cap**, so every legal structure needs credit
+≥ 38.5% of width, which exists only within ±200 of ATM. The cap stops binding at
+~±200; the edge starts at ~±400.
+
+Eleven strategy families were tested and closed, including SENSEX (whose risk
+quantum is exactly ₹2,000, so the cap stops binding — it still loses ₹26,560).
+The only durable edge found is a far-OTM condor at ±650/700: statistically
+bulletproof (t = +4.04 to +6.52, holdout holds) and worth **1.4%/yr** at 1.8× the
+cap. Real, stable, too small.
+
+**Scale of the ask**: 22.5% net at a 10% drawdown cap implies Sharpe ≈ 1.9; at 5%,
+≈ 3.4. Medallion ran 1.89.
 
 The second study tests the rules the bot actually runs (time-window entry,
 target/stop exits, expiry square-off), which EOD data structurally cannot
-evaluate. Both breach the drawdown cap by 2–4×. In the intraday study the gross
-edge is *negative* once slippage is modelled at 5 ticks/leg — the apparent profit
-is smaller than the spread it must cross eight times.
+evaluate. In it the gross edge is *negative* once slippage is modelled at 5
+ticks/leg.
+
+**The drawdown is not a second failure.** It follows from the negative mean:
+shift the same per-trade distribution to earn 20%/yr, keeping its exact variance,
+and P(drawdown ≤ 10%) is **99.7%**. The risk architecture works and should not be
+redesigned in response to these results.
 
 - [x] Implement candidate structures: iron condor with configurable
       offsets/wings/entry-exit rules; per-trade max loss constrained to ₹1–2k
@@ -81,11 +95,12 @@ is smaller than the spread it must cross eight times.
 
 **Gate 2** (= gate 2 in docs/06): chosen config meets target net of costs AND stays inside the drawdown cap on held-out data. *If nothing passes honestly, the finding is "target infeasible as specified" — report it, don't torture parameters.*
 
-**Gate 2 verdict: NOT PASSED.** Invoking that clause as written. Two independent
-datasets, two independent strategy formulations, no edge in either. The cost
-floor (~₹227 per round trip against a median credit of ₹1,820) is the binding
-problem, and it is not a parameter. Advancing to Phase 4/5 with this strategy
-would be torturing parameters by another name.
+**Gate 2 verdict: NOT PASSED.** Invoking that clause as written. The binding
+problem is not the cost floor and not a parameter: it is that the premium is
+concentrated in the tail while the ₹2,000 cap — against a ₹3,250 minimum risk
+unit — confines every legal structure to the body. Advancing to Phase 4/5 with a
+defined-risk premium-selling strategy would be torturing parameters by another
+name.
 
 Two methodological traps this phase surfaced, both of which will silently
 manufacture a passing result if repeated — see docs/11 for the evidence:
