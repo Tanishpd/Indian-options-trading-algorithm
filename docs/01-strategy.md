@@ -19,6 +19,18 @@ At ₹1 lakh, this is the sole structurally feasible selling category (verified 
 
 That's the entire weekly universe. Since November 2024 each exchange may run one weekly index expiry only.
 
+**SENSEX can be traded but not yet validated to the same standard as NIFTY.**
+Free BSE bhavcopy supplies end-of-day SENSEX option data (verified working, same
+UDiFF schema as NSE), so hold-to-expiry economics are testable. What does not
+exist at any retail price is **intraday SENSEX option history**, so the
+intraday-triggered rules the live bot actually runs cannot be backtested on
+SENSEX at all. NIFTY has the same intraday gap, but a far deeper EOD sample.
+
+Consequence for the docs/06 gate order: **Phase 3 validation is NIFTY-first in
+practice.** Trading SENSEX live would rest on materially thinner evidence, and
+that should be a deliberate decision rather than something discovered after the
+fact.
+
 ## Explicitly ruled out
 
 - **Naked strangles/straddles/short options** — margin impossible at ₹1L; tail risk violates the drawdown cap at any capital.
