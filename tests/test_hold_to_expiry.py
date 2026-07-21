@@ -184,12 +184,60 @@ def test_credit_filter_skips_thin_cycles():
     assert strict.trades == [] and strict.skipped["credit_too_thin"] == 1
 
 
-def test_total_cycles_accounts_for_every_expiry():
+def test_every_expiry_lands_in_exactly_one_bucket():
+    """total_cycles is used as a denominator, so a silently dropped cycle would
+    understate it. An expiry whose expiry day is outside the loaded range must
+    be counted, not skipped invisibly."""
     days = book(
         {(SC, Right.CALL): 30.0, (LC, Right.CALL): 12.0,
          (SP, Right.PUT): 28.0, (LP, Right.PUT): 10.0},
         {(SC, Right.CALL): 6.0, (LC, Right.CALL): 1.0,
          (SP, Right.PUT): 5.0, (LP, Right.PUT): 1.0},
     )
+    # A second expiry whose expiry day is absent from the loaded range.
+    from dataclasses import replace as dc_replace
+    beyond = date(2026, 8, 25)
+    days[ENTRY] = days[ENTRY] + [dc_replace(days[ENTRY][0], expiry=beyond)]
+
     s = run(days, CondorParams(offset_pct=0.008, wing_points=50.0), ZERO, RISK)
-    assert s.total_cycles == len(s.trades) + sum(s.skipped.values())
+    assert s.skipped["expiry_outside_range"] == 1        # counted, not dropped
+    assert s.total_cycles == 2                            # both expiries accounted for
+
+
+def test_zero_filter_is_a_true_no_op():
+    """`credit < 0.0 * wing` would reduce to `credit < 0` and silently drop
+    net-debit cycles, which stale non-synchronous prints do produce."""
+    debit = book(
+        {(SC, Right.CALL): 10.0, (LC, Right.CALL): 14.0,
+         (SP, Right.PUT): 10.0, (LP, Right.PUT): 14.0},          # credit = -8
+        {(SC, Right.CALL): 1.0, (LC, Right.CALL): 0.5,
+         (SP, Right.PUT): 1.0, (LP, Right.PUT): 0.5},
+    )
+    wide = RiskConfig(per_trade_max_loss_rupees=5000.0)
+    s = run(debit, CondorParams(offset_pct=0.008, wing_points=50.0), ZERO, wide)
+    assert len(s.trades) == 1 and s.trades[0].credit == -8.0
+    assert s.skipped["credit_too_thin"] == 0
+
+
+def test_cap_is_attributed_before_the_filter():
+    """The cap is itself a credit floor, so filter-first would absorb the cap's
+    rejections and make it read as though the cap no longer binds."""
+    thin = book(
+        {(SC, Right.CALL): 5.0, (LC, Right.CALL): 3.0,
+         (SP, Right.PUT): 6.0, (LP, Right.PUT): 2.0},            # credit 6, cap-breaching
+        {(SC, Right.CALL): 1.0, (LC, Right.CALL): 0.5,
+         (SP, Right.PUT): 1.0, (LP, Right.PUT): 0.5},
+    )
+    s = run(thin, CondorParams(offset_pct=0.008, wing_points=50.0,
+                               min_credit_frac=0.50), ZERO, RISK)
+    assert s.skipped["over_cap"] == 1                     # the cap rejected it
+    assert s.skipped["credit_too_thin"] == 0              # not double-attributed
+
+
+def test_empty_study_reports_nan_not_a_perfect_record():
+    from optionsbot.research.hold_to_expiry import Study
+    import math
+
+    empty = Study(trades=[], skipped={})
+    assert math.isnan(empty.win_rate)
+    assert math.isnan(empty.max_drawdown(100000))
