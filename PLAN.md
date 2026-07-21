@@ -41,12 +41,50 @@ Build per [docs/06](docs/06-backtesting-and-validation.md) rules:
 
 ## Phase 3 — Strategy research
 
-- [ ] Implement candidate structures: iron condor, credit spreads (call/put side), with configurable deltas/wings/entry-exit rules; per-trade max loss constrained to ₹1–2k ([docs/04](docs/04-risk-management.md)).
-- [ ] Parameter search **inside the drawdown constraint**: reject any config whose held-out max drawdown exceeds the cap, then rank survivors by net return.
-- [ ] Robustness checks: parameter-neighborhood stability, cost +25% stress, slippage stress, worst-month analysis.
-- [ ] Write up the chosen system (entry/exit/sizing/adjustment rules) as `docs/decisions/strategy-spec.md`.
+**Status: gate 2 tested twice, failed twice. Do not propose parameters without
+reading both findings documents first.**
+
+| Study | Data | Result |
+|---|---|---|
+| [docs/10](docs/10-first-backtest-findings.md) | EOD bhavcopy, 71 trades, 20 months | net −₹16,740, gross +₹75, max DD 22.6% |
+| [docs/11](docs/11-intraday-backtest-findings.md) | Minute bars, 72 cycles, 17 months | net −₹18,191, gross −₹1,993, max DD 18.2% |
+
+The second study tests the rules the bot actually runs (time-window entry,
+target/stop exits, expiry square-off), which EOD data structurally cannot
+evaluate. Both breach the drawdown cap by 2–4×. In the intraday study the gross
+edge is *negative* once slippage is modelled at 5 ticks/leg — the apparent profit
+is smaller than the spread it must cross eight times.
+
+- [x] Implement candidate structures: iron condor with configurable
+      offsets/wings/entry-exit rules; per-trade max loss constrained to ₹1–2k
+      ([docs/04](docs/04-risk-management.md)).
+- [x] Parameter search **inside the drawdown constraint**. A 3×3 sweep over
+      profit target × stop level found no survivor: all nine configurations lose
+      money and every one breaches the cap.
+- [x] Robustness checks: slippage stress (0 → 0.50/leg), chronological
+      train/holdout split, bootstrap significance. The best in-sample config
+      (+₹843) returns −₹6,302 out of sample; no t-statistic reaches 1.
+- [ ] Write up the chosen system as `docs/decisions/strategy-spec.md` —
+      **blocked, and correctly so: there is no chosen system to write up.**
 
 **Gate 2** (= gate 2 in docs/06): chosen config meets target net of costs AND stays inside the drawdown cap on held-out data. *If nothing passes honestly, the finding is "target infeasible as specified" — report it, don't torture parameters.*
+
+**Gate 2 verdict: NOT PASSED.** Invoking that clause as written. Two independent
+datasets, two independent strategy formulations, no edge in either. The cost
+floor (~₹227 per round trip against a median credit of ₹1,820) is the binding
+problem, and it is not a parameter. Advancing to Phase 4/5 with this strategy
+would be torturing parameters by another name.
+
+Two methodological traps this phase surfaced, both of which will silently
+manufacture a passing result if repeated — see docs/11 for the evidence:
+
+1. **A risk cap doubles as a selection filter.** Entry that waits for the
+   structure to become affordable is an undeclared "enter only when premium is
+   rich" signal. It was worth ₹4,474 of an earlier reported figure, and its
+   threshold moves with lot size, so it cannot generalise. Report cap-on and
+   cap-off results side by side.
+2. **Unmodelled slippage.** Minute data carries no bid/ask, so this cost must be
+   assumed rather than measured. Assuming zero was worth ~₹12,000.
 
 ## Phase 4 — Trading bot
 

@@ -40,7 +40,14 @@ class CondorParams:
     entry_start: time = time(10, 0)    # avoid the open auction noise
     entry_end: time = time(14, 0)
     profit_target_frac: float = 0.5    # exit when buyback cost <= 50% of credit
-    stop_credit_mult: float = 2.0      # exit when buyback cost >= 2x credit
+    # Stop expressed as a share of MAX LOSS, not as a multiple of credit.
+    # A credit multiple is not always reachable: a 2x stop on a 29-point credit
+    # needs the structure to be worth 58 when a 50-point wing caps it at 50, so
+    # the stop can never fire. Measured on real chains, a 2.0x stop was
+    # unreachable in 45 of 72 cycles — the strategy ran effectively unstopped
+    # 62% of the time (docs/11). A fraction of max loss is reachable by
+    # construction and expresses the same intent.
+    stop_loss_frac: float = 0.60       # exit once 60% of max loss is unrealised
     squareoff: time = time(14, 45)     # expiry-day hard exit (docs/05 rule 3)
     limit_pad: float = 0.005           # cross the touch price by 0.5% so limits fill
     pad_growth: float = 0.5            # extra pad per unfilled retry (x limit_pad)
@@ -188,6 +195,18 @@ class ReferenceCondor:
             (touch(leg, q) if leg.side is Side.SELL else -touch(leg, q))
             for leg, q in zip(legs, quotes)
         )
+        # A condor cannot be sold for more than its wing width, or for nothing.
+        # Outside that the four legs quoted at different instants and the credit
+        # is an artefact. The cap check below cannot catch it: an over-wing
+        # credit makes `worst` negative, so it passes trivially and the bot
+        # enters a real position on a price that never existed.
+        if not (0.0 < credit < width):
+            self._say(
+                f"entry skipped: quoted credit {credit:.2f} outside (0, {width:.2f}) "
+                f"— non-synchronous quotes"
+            )
+            return []
+
         worst = (width - credit) * ctx.lot_size
         if worst > self.risk.per_trade_max_loss_rupees:
             self._say(
@@ -256,20 +275,41 @@ class ReferenceCondor:
             self.phase = "exiting"
             return
 
-        credit = self._realized_credit(book)
-        if credit <= 0:
-            return  # defensive: nonsense basis, let squareoff/loop backstops act
+        # Both triggers are evaluated in rupees against the book that actually
+        # exists. Deriving max loss from params instead of from the held strikes
+        # let a params/book divergence (a config edit across a restart, or the
+        # adopt-from-book path) silently place the stop outside the range the
+        # structure can reach — the same unreachable-stop failure in a new guise.
+        # `worst` is the book's own worst case, already computed above.
+        credit = sum(-p_.entry_price * p_.net for p_ in book)   # rupees received
+        if credit <= 0 or worst <= 0:
+            # Not silent: a book with no credit or no downside is either a data
+            # fault or an arbitrage, and in both cases there is nothing for a
+            # stop to protect. Squareoff and the loop backstops still apply.
+            self._say(f"no stop basis: credit Rs {credit:,.0f}, worst Rs {worst:,.0f}")
+            return
         quotes = [ctx.chain.get(p_.leg.key) for p_ in book]
         if any(q is None for q in quotes):
             return  # can't price an exit this tick
-        buyback = sum(
-            (q.ltp if p_.net < 0 else -q.ltp) for p_, q in zip(book, quotes)
-        )
-        if buyback <= credit * (1 - p.profit_target_frac):
-            self._say(f"profit target: buyback {buyback:.2f} vs credit {credit:.2f}")
+        pnl = sum((q.ltp - p_.entry_price) * p_.net for p_, q in zip(book, quotes))
+
+        # A defined-risk structure cannot be worth less than -worst or more than
+        # the credit taken. Outside that, the four legs last printed at different
+        # instants and the difference is an artefact, not a price (docs/11). The
+        # study rejects these; acting on one here would flatten a sound position.
+        if not (-worst - 1e-6 <= pnl <= credit + 1e-6):
+            self._say(f"ignoring unpriceable tick: implied P&L Rs {pnl:,.0f} "
+                      f"outside [{-worst:,.0f}, {credit:,.0f}]")
+            return
+
+        if pnl >= p.profit_target_frac * credit:
+            self._say(f"profit target: P&L Rs {pnl:,.0f} of Rs {credit:,.0f} credit")
             self.phase = "exiting"
-        elif buyback >= credit * p.stop_credit_mult:
-            self._say(f"stop: buyback {buyback:.2f} vs credit {credit:.2f}")
+        elif -pnl >= p.stop_loss_frac * worst:
+            self._say(
+                f"stop: loss Rs {-pnl:,.0f} >= {p.stop_loss_frac:.0%} "
+                f"of max loss Rs {worst:,.0f}"
+            )
             self.phase = "exiting"
 
     def _exit_orders(self, ctx, book) -> list[Order]:
