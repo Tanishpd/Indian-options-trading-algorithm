@@ -2,226 +2,215 @@
 
 Two studies said the strategy loses ([docs/10](10-first-backtest-findings.md),
 [docs/11](11-intraday-backtest-findings.md)). Both explained it with a mechanism
-that is **wrong**. This document corrects it, and states the one measurement that
-decides whether this project's mandate is reachable at all.
+that is **wrong**. This document gives the right one and closes the question.
 
-It exists because "we lost money" is not a finding. "The market pays 2.08 volatility
-points and this account needs 5.4" is a finding — it ends the parameter search
-instead of inviting a tenth sweep.
+It exists because "we lost money" is not a finding. **"The premium is real, it is
+large, it is stable, and it lives in a part of the surface the risk cap forbids us
+from being short"** is a finding — it ends the parameter search instead of
+inviting a tenth sweep.
 
-## The correction: options are NOT priced efficiently
+## 1. Options are NOT priced efficiently
 
 docs/10 concluded *"the options are priced efficiently — the premium collected
 compensates precisely for the risk taken. There is no gross edge to harvest."*
 
-That is refuted. Measured on our own data — implied volatility at entry against
-subsequently realised volatility to expiry, 71 cycles, no holding-period
-selection:
+Refuted. Implied volatility at entry against subsequently realised volatility to
+expiry, 72 cycles:
+
+| | 2 sessions to expiry | 4 sessions | 1 session |
+|---|---|---|---|
+| **Variance risk premium** | **+1.96 vol points** | +1.06 | +1.89 |
+| t-statistic | **+3.76** | +2.02 | +3.01 |
+| Bootstrap 95% CI | [+0.90, +2.91] | — | — |
+| Cycles positive | **74%** | — | — |
+
+Robust to the realised-vol estimator (1-min 12.42%, 5-min 12.60%, 30-min 12.55%),
+so it is not an artifact of sampling frequency. **NIFTY options are systematically
+overpriced, and the premium grows as expiry approaches.**
+
+Independent corroboration: a preprint measuring 43M one-minute bars over
+2022–2026 reports the VRP positive on 74.9% of days at +1.208 points, against our
+independent 74% at +1.06. Convergent on the *measurement* — it says nothing about
+tradeability and is not evidence of an exploitable edge (mandate rule 5).
+
+### The edge is worth 7–10× the cost floor
+
+Three independent methods agree on its size:
+
+| Method | Per cycle |
+|---|---|
+| Zero-cost short ATM straddle, perfect fills | **+₹1,722** |
+| Delta-hedged at 15-minute intervals | **+₹2,412** (t = +2.95) |
+| Vega × measured (IV − RV) | **+₹2,182** |
+
+Against a ₹230 cost floor. So the premium is not marginal. It is roughly ten times
+what it costs to trade.
+
+**Which makes the real question: why did every structure we built capture none of it?**
+
+## 2. The answer: the entire premium is tail insurance
+
+This is the central finding, and it needs no volatility model — just prices:
+
+```
+short ATM straddle              +Rs 1,722 / cycle
+short ±500 strangle inside it   +Rs 1,750 / cycle
+-------------------------------------------------
+=> everything within ±500       +Rs    48 / cycle
+```
+
+**The tail is 102% of the straddle's edge.** Every rupee of premium in NIFTY
+weeklies is compensation for tail risk. The body of the distribution — the region
+a capped, defined-risk structure is confined to — pays essentially nothing.
+
+Now apply that to what we were trading. **A defined-risk structure is short the
+near strikes and long the far ones. It is a net *buyer* of the only part of the
+surface that pays.** We were not failing to harvest the premium. We were paying it.
+
+That is arithmetic, not a parameter failure, and it explains docs/10 and docs/11
+mechanically. Corroborating evidence that this is structural rather than local:
+Carr & Wu (2009, *Review of Financial Studies* 22(3)) find the SPX premium
+"concentrated in the downside" and driven substantially by crash risk — the same
+tail concentration, in a different market, twenty years earlier.
+
+Direct confirmation, at zero cost and perfect fills:
+
+- **ATM iron butterfly**: −₹27 (50-wide), −₹126 (100), −₹179 (200), −₹409 (300)
+  per cycle — negative at every width, before a single rupee of cost.
+- **36 condor configurations**: not one has a bootstrap 95% lower bound above the
+  ₹230 cost floor.
+
+## 3. Why the cap cannot reach the tail: the risk quantum
+
+NIFTY strikes are 50 points apart (verified, zero exceptions across the sample)
+and the lot is 65. So the **smallest possible width-based max loss is
+50 × 65 = ₹3,250 — already above the ₹2,000 per-trade cap.**
+
+Every NIFTY credit structure therefore needs credit ≥ ₹1,250, i.e. **38.5% of the
+width, just to be legal.** Credit that rich exists only within ±200 points of ATM.
+
+```
+cap stops binding at   ~±200 from ATM
+edge starts at         ~±400 from ATM
+```
+
+A dead zone between them, and a 50-point grid offers no intermediate structure.
+Measured edge inside ±200: **−₹153 to +₹20 per cycle, every CI spanning zero.**
+
+### Where the edge is real, and why it still fails
+
+Far-OTM 50-wide condors at ±650/±700/±750:
 
 | | |
 |---|---|
-| **Variance risk premium** | **+2.08 volatility points** |
-| t-statistic | **+2.95** |
-| 95% confidence interval | [+0.70, +3.46] |
-| Cycles where IV exceeded RV | **53 of 71** |
-| Sign test | z = +4.15 |
+| t-statistic | **+4.04 / +6.52 / +6.33** |
+| Bootstrap 95% CI | strictly positive: [71, 213] / [103, 188] / [84, 158] |
+| Train → holdout | +₹1,296 → +₹1,107 (**stable**) |
+| Paid out in | **0 of 72 cycles**; worst cycle +₹132 |
+| Drop the 5 best cycles | still +₹826/cycle |
 
-**NIFTY index options are systematically overpriced, and the effect is
-statistically solid.** Sellers are paid a real premium for bearing variance risk.
-The failure in docs/10 and docs/11 is not the absence of an inefficiency. It is
-the inability to monetise a real one at this account size.
+**This is the only durable edge this project has found.** It is not luck, not an
+outlier artifact, and it survives out of sample — unlike the ATM straddle edge,
+which halves (train +₹2,964 → holdout +₹480).
 
-That distinction matters, because "no edge exists" and "the edge is too small for
-₹1 lakh" imply completely different next steps.
+Note what that means: **the stable part of the premium is precisely the part the
+mandate cannot trade.**
 
-## Why a real edge still loses money
+Fully costed, the best surviving candidate (±650/700 condor, held to settlement,
+4 orders) nets **+₹48/cycle ≈ 1.4%/yr at zero slippage**, with a median max loss
+of ₹3,600 — **1.8× the cap**, with only 7 of 72 cycles fitting. Real, stable, and
+too small. No experiment rescues it, because the failure is in the *size*, not the
+significance.
 
-Size it against the structure actually traded:
+## 4. Everything tested and closed
 
-```
-condor net short vega            Rs 115.4 per volatility point
-premium available                2.08 points
-=> theoretical gross per trade   Rs 240
-cost floor per round trip        Rs 226
-=> edge net of costs             Rs +14 per trade
-```
+| Family | Result |
+|---|---|
+| NIFTY condor, hold to expiry | −₹16,740 / 71 trades (docs/10) |
+| NIFTY condor, intraday triggers | −₹21,066 / 72 cycles (docs/11) |
+| IV filters (absolute, and proper IV-rank walk-forward) | r = −0.016; every threshold loses in holdout |
+| Cheaper execution | loses **even at ₹0 brokerage** (−₹7,472) |
+| Wider wings | infeasible: required credit share rises with width |
+| Trading less often | cost and capped opportunity both per-trade |
+| 2-leg verticals | cost halves, max loss rises; 6/72 cycles fit |
+| Raising the DD cap to 15% | **₹8,321 worse** — unblocks the worst cycles |
+| 0-DTE ATM butterfly | −₹6,605 gross **before** costs, 77 cycles |
+| Calendars | +₹612/trade gross, but 98% from 5 of 49 trades, sign-flips train→holdout, 49/49 breach the cap |
+| **SENSEX credit structures** | **−₹26,560 condor, −₹6,168 vertical** |
+| Non-option alternatives | futures need 1.8–2.3× the account as margin; SMA trend filters lose at all six lengths |
 
-Two entirely independent methods agree. The realised backtest gives roughly zero
-gross per trade; theory (vega × measured VRP) gives ₹240 against a ₹226 cost. **The
-edge and the cost floor are the same size.** Everything this project has measured
-follows from that one fact.
+**SENSEX deserves a note**, because it was the strongest structural lead. Lot 20 ×
+100-point strikes = a risk quantum of **exactly ₹2,000** — verified from live BSE
+bhavcopy, not memory — so the cap stops binding and a genuinely OTM short becomes
+legal. That is the one place the quantum trap disappears. It was tested anyway,
+and it loses. The quantum was necessary but not sufficient: SENSEX's premium is in
+its tail too.
 
-The requirement, stated as the market variable rather than as P&L:
+## 5. The drawdown cap was never the problem
 
-> **20% a year on ₹1,00,000 requires a variance risk premium of 5.4 volatility
-> points. The market offers 2.08, with a 95% upper bound of 3.46.**
-
-The premium would have to more than double, and stay doubled.
-
-## The second correction: the drawdown cap was never the problem
-
-docs/10 and docs/11 both present the 21–23% drawdown as an *independent* failure —
-"breaches the cap by 2–4×, the same failure mode". **It is not independent.** It is
-a consequence of the negative mean, and it disappears when the mean does.
-
-Bootstrapping the observed per-trade net distribution, shifted only so the strategy
-earns 20% a year and otherwise keeping its exact variance:
+docs/10 and docs/11 both presented the 21–23% drawdown as an *independent* failure.
+It is not — it follows from the negative mean. Bootstrapping the same per-trade
+distribution shifted only so the strategy earns 20%/yr, keeping its exact variance:
 
 | | |
 |---|---|
 | Median 1-year max drawdown | **3.4%** |
 | P(drawdown ≤ 10%) | **99.7%** |
 
-The variance of this strategy is entirely compatible with a 5–10% cap. There is
-**one** problem — the mean — not two. **The risk architecture works. Do not
+There is **one** problem, the mean, not two. **The risk architecture works. Do not
 redesign the kill-switch, the per-trade cap, or the position rules in response to
-the backtest results.** They are not what failed.
+these results.**
 
-## Why more capital is the constraint, and why it is still not enough
+## 6. What the mandate actually asks for
 
-₹188.80 of the ₹226 round trip is flat per-order brokerage plus the GST riding on
-it — **independent of lot count**. Only ₹36.70 scales with size. So return on
-capital rises sharply as the fixed cost is spread over more lots:
+Stated as a risk-adjusted target rather than a return:
 
-| Capital | Lots | Cost/trade | At measured VRP | At 95%-upper VRP |
-|---|---:|---:|---:|---:|
-| ₹1,00,000 | 1 | ₹226 | **+0.7%** | +8.8% |
-| ₹5,00,000 | 5 | ₹372 | +8.4% | +16.5% |
-| ₹10,00,000 | 10 | ₹556 | +9.4% | +17.4% |
-| unlimited | — | — | **+10.3% ceiling** | +18.4% ceiling |
+> 22.5% net at a 10% maximum drawdown implies a Sharpe ratio near **1.9**.
+> At a 5% cap, near **3.4**.
+>
+> Renaissance Technologies' Medallion fund ran **1.89**.
 
-At ₹1 lakh, **fixed brokerage alone consumes 8.2% a year** — a third of the target,
-gone before any market risk is taken.
+The mandate as written asks for Medallion — from ₹1 lakh, retail, automated, on
+weekly index spreads. That is the honest scale of the ask, and it was not visible
+at the start of this project.
 
-But read the last row before treating capital as the answer. **Even with unlimited
-capital and the optimistic end of the confidence interval, this structure tops out
-below 20%.** More capital converts a losing strategy into a mediocre one; it does
-not reach the mandate. And every figure in that table is optimistic: the
-theoretical ₹240 sits *above* the realised gross 95% upper bound of ₹175.
+Capital does not fix it. ~₹5 lakh makes the tail condor cap-legal, and it still
+yields ~1.4%/yr. A sub-₹15-lakh-notional index contract would change the
+arithmetic, but SEBI's minimum contract value forbids one and mini contracts were
+discontinued in 2012.
 
-## Objections tested and closed
+**The do-nothing floor is 5.25–6.7% at near-zero drawdown.**
 
-### "72 cycles is too small to conclude anything"
+## 7. Limits of this analysis
 
-It isn't, for the effect size that matters.
+72–77 cycles of one index over 17 months, in a **crisis-free, unusually quiet
+window** — mean India VIX 13.89, the 21st percentile of 2010–2023, with July 2025
+to February 2026 at the 4.8th percentile.
 
-- Observed sd ₹1,046/trade, standard error ₹123
-- Minimum detectable effect at 80% power: **₹345/trade**
-- The mandate requires **₹619/trade** (20%) or **₹717** (25%)
-- Power against those effects: **99.9%** and **100%**
-- 95% CI on gross: [−₹309, **+₹175**]/trade — the *upper* bound annualises to
-  **−2.6%** net, or **+5.5%** at zero brokerage
+This cannot rule out:
 
-The sample is genuinely underpowered only for edges of ₹100–200/trade (power
-13–37%). An edge that small cannot fund the mandate, so the ambiguity is real but
-confined to a region that does not help.
+- a volatility regime unlike 2024–26 (though the condor's short vega *falls* as
+  vol rises — ₹115.4 → ₹71.7 per point at 1.32× IV — so stacking long-run vol
+  *and* the optimistic VRP bound still gives only 0.53× of what the mandate needs)
+- event-conditioned entries (budget, RBI policy, elections), never isolated
+- intraday SENSEX behaviour — only EOD was tested, and no retail intraday SENSEX
+  history exists (docs/01)
+- an edge too small to detect at n = 72 — but anything that small cannot fund a
+  20% target either
 
-### "The test ran in an unusually quiet volatility regime"
+What it does establish: **harvesting the variance risk premium with defined-risk
+index spreads at ₹1 lakh is refuted** — not by a noisy backtest, but by a
+decomposition showing the premium sits entirely outside the region the risk cap
+permits, on a strike grid whose minimum risk unit already exceeds that cap.
 
-**Half right, and the strongest objection raised.** It was quiet:
+## Reproducing
 
-- Window mean India VIX **13.89** — the **21st percentile** of 2010–2023; long-run
-  mean 18.33, a factor of **1.32**
-- July 2025 – February 2026 averaged **11.55** — the **4.8th percentile**. The ten
-  lowest VIX closes in the index's history all fall inside this window.
-- Our own measurement agrees: in-window realised vol 12.9% against ~17.0% long-run
+All headline figures were computed from
+[`data/intraday/NIFTY`](../data/intraday/) — 72 expiry cycles, authenticity
+reconciled to NSE bhavcopy (docs/11) — and from
+[`src/optionsbot/data/bhavcopy.py`](../src/optionsbot/data/bhavcopy.py) for the
+SENSEX contract specification. The condor study itself:
 
-But it does not bridge the gap, because **the condor's short vega falls as
-volatility rises** — fixed 50-point wings sit relatively closer in delta terms, so
-vega drops from ₹115.4 to ₹71.7 per point at 1.32× IV. The structure harvests less
-of each additional point it is offered. Stacking *both* optimistic assumptions —
-long-run volatility **and** the 95% upper VRP bound — yields **₹328/trade against
-₹619 needed: 0.53×**. At zero brokerage, 0.71×.
-
-The regime argument is worth perhaps +5%/yr, not +20%.
-
-It also cuts both ways. The window ends with the March 2026 spike (VIX 13.7 → 28.9,
-the highest since 2022): 4 cycles, **0% win rate, −₹4,410**. Excluding it, the
-strategy still loses ₹16,655. The tail did not cause the loss — and a higher-vol
-regime brings more such tails.
-
-### "A proper IV filter would fix it"
-
-docs/10's attempt was inadequate, and this is a fair criticism of it: it tested an
-**absolute** credit-as-%-of-wing threshold, which conflates IV level with DTE and
-moneyness, and it swept thresholds, which invites overfitting. A competent seller
-filters on **IV rank** — relative, not absolute.
-
-So the better test was run: Black-Scholes ATM implied volatility at every entry
-minute, expanding-window IV rank with no look-ahead, walk-forward split. **It fails
-harder.**
-
-- Threshold-free correlation with gross P&L: ATM IV **r = −0.020**, IV rank
-  **r = −0.016**, credit/wing **r = +0.072**. All null — a near-zero correlation
-  kills every possible threshold at once, without sweeping any.
-- Walk-forward: **every** IV-rank threshold (30/50/60/70/80/90) loses in holdout,
-  and gross per trade gets *worse* at higher thresholds (−₹410 at rank 70, −₹815 at
-  rank 80).
-- High-IV vs low-IV tercile difference: +₹184/trade, **t = +0.60**. Not significant.
-
-The tercile data does show the classic seller's trap: as IV rises the win rate
-*falls* (58% → 42%) while the average win grows. That is why Spearman (+0.22)
-exceeds Pearson (≈0) — and why it never becomes money.
-
-### "Hold longer to earn more of the premium"
-
-The VRP finding points here, and it fails hard. Entering earlier (DTE 4–8, 6–10)
-drives gross from −₹67 to **−₹347/trade, t = −3.39**. A 0.8% offset is far too close
-to the money to survive a longer window.
-
-The best configuration found anywhere in this project is hold-to-expiry, DTE 2–6,
-triggers disabled: gross **+₹122/trade** — but t = +0.62, not significant — netting
-−₹7,255 with a 16.1% drawdown. At zero brokerage, +3.0%/yr.
-
-## The pre-committed experiment
-
-One measurement decides whether this strategy family can ever work, and the
-threshold is set **before** running it so the result cannot be rationalised
-afterwards.
-
-**Measure the variance risk premium across ~4 years of NIFTY history**, spanning
-2020 and 2022's higher-volatility regimes — roughly 200 observations, tightening
-the confidence interval to about ±0.8 points.
-
-- **Data**: free EOD bhavcopy plus the index series. No minute data, no execution
-  modelling, no backtest engine, no broker. One script reusing
-  [`src/optionsbot/data/bhavcopy.py`](../src/optionsbot/data/bhavcopy.py).
-- **Method**: ATM implied volatility at entry against subsequently realised
-  volatility to expiry, per cycle.
-
-> **PRE-COMMITMENT: if the 95% upper bound on the variance risk premium comes in
-> below 5.4 volatility points, the mandate is dead structurally — not
-> regime-specifically — and no further parameter search on premium selling is
-> justified.**
-
-The point estimate would have to more than double to clear that bar, so the honest
-expectation is that this confirms the stop. Its value is that it converts *"we
-tested a quiet window and lost"* into *"the premium the market pays is structurally
-too small for a ₹1 lakh account"* — a finding that ends the search rather than
-inviting another sweep.
-
-## What this changes
-
-1. **docs/10's stated mechanism is wrong** and is corrected there. Options are not
-   efficiently priced; the premium is real, measured, and too small.
-2. **The drawdown framing in docs/10 and docs/11 is wrong** and is corrected in
-   both. One failure, not two. The risk framework is sound.
-3. **The question is no longer "which parameters".** It is "at what capital does a
-   ~10% target become reachable" — and the table above answers ₹5 lakh or more, for
-   roughly half the original goal.
-4. **The mandate as written — 20–25% net on ₹1,00,000 at 5–10% drawdown from
-   defined-risk index spreads — is refuted**, not by a noisy backtest but by
-   arithmetic on a measured, statistically significant edge that is 2.6× too small,
-   inside a cost structure that consumes 8.2%/yr of the account before risk.
-
-## Limits of this analysis
-
-One index, 71–72 cycles, 17 months, one volatility regime (a quiet one). The VRP
-estimate is significant but its confidence interval is wide — [+0.70, +3.46] — and
-the whole argument rests on it. That is precisely why the pre-committed experiment
-above measures it on a longer history before anything else is built.
-
-Nothing here rules out edges of a different kind: directional, cross-sectional, or
-structures whose vega-per-rupee-of-cost is materially better than a symmetric
-condor's. It rules out **harvesting the variance risk premium with defined-risk
-NIFTY index spreads at ₹1 lakh**, which is what this project set out to do.
+```
+python -m optionsbot.research.run_intraday data/intraday/NIFTY --targets 0.50 --stops 0.60
+```

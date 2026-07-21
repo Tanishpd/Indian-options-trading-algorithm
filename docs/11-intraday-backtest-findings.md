@@ -50,9 +50,11 @@ the whole finding: the apparent edge is smaller than the bid/ask spread it has t
 cross eight times.
 
 This is *not* because the options are efficiently priced. They are not — the
-measured variance risk premium is **+2.08 volatility points (t = 2.95)**, worth
-about ₹240 per condor against a ₹226 cost floor. The edge is real and the same
-size as the cost. See [docs/12](12-where-the-edge-actually-is.md).
+variance risk premium is **+1.96 volatility points (t = +3.76)**, worth
+₹1,700–2,400 per cycle against a ₹230 cost floor. The premium is roughly ten times
+the cost of trading. **It all sits beyond ±500 points from ATM**, and a condor is
+short the near strikes and long the far ones — a net *buyer* of the only part of
+the surface that pays. See [docs/12](12-where-the-edge-actually-is.md).
 
 Read the second row as the honest one. The gap between the two is not the
 strategy performing better under a risk control — it is the per-trade cap acting
@@ -256,9 +258,10 @@ Known limitations, documented rather than smoothed over:
 1. **Do not go live with this strategy.** Two independent studies on two
    independent datasets now agree: hold-to-expiry (docs/10) and
    intraday-triggered (here). Neither monetises the edge that exists
-   ([docs/12](12-where-the-edge-actually-is.md)): the variance risk premium is
-   real at +2.08 volatility points but worth ₹240 against a ₹226 cost floor, and
-   20%/yr would require 5.4 points.
+   ([docs/12](12-where-the-edge-actually-is.md)): the premium is real and large,
+   but it is entirely tail insurance, and NIFTY's minimum risk unit
+   (50pt × lot 65 = ₹3,250) already exceeds the ₹2,000 cap — so every legal
+   structure is confined to the region that pays nothing.
 2. **The cost floor is the binding problem, not the parameters.** ₹227 per round
    trip on a structure whose median credit is 28 points (₹1,820 at lot 65) means
    costs eat 12% of maximum theoretical profit before any market risk. A 3×3
