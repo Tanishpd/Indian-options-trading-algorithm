@@ -14,13 +14,29 @@ TICK_SIZE = 0.05  # NSE/BSE option tick — limits off this grid are exchange-in
 
 
 def to_tick(price: float, side: Side, tick: float = TICK_SIZE) -> float:
-    """Snap a limit price onto the exchange tick grid, conservatively:
-    BUY rounds up, SELL rounds down (never better than intended)."""
+    """Snap a limit price onto the exchange tick grid.
+
+    BUY rounds up, SELL rounds down — never a better price than intended, with
+    one exception: a positive price below one tick returns one tick, because
+    nothing below that is quotable. That is the only case where the result can
+    sit on the far side of the reference, and it is preferred to the
+    alternative, which is emitting an invalid limit of 0.00.
+    """
     import math
 
     steps = price / tick
-    snapped = (math.ceil(steps - 1e-9) if side is Side.BUY else math.floor(steps + 1e-9)) * tick
-    return max(0.0, round(snapped, 2))
+    snapped = max(0.0, round(
+        (math.ceil(steps - 1e-9) if side is Side.BUY else math.floor(steps + 1e-9)) * tick, 2
+    ))
+    # An option cannot trade below one tick, so a positive price must never snap
+    # to zero. It otherwise happens on every exit of a leg sitting at the 0.05
+    # minimum: the pad puts the SELL reference at 0.049x, rounding down gives a
+    # limit of 0.00, and a zero SELL limit is not a low price -- it is "accept
+    # anything". The broker crosses it and books zero premium for a leg that was
+    # worth 0.05, giving away Rs 3.25 per 65-share leg for nothing.
+    if price > 0.0 and snapped < tick:
+        return tick
+    return snapped
 
 
 def protection_band_limit(reference_price: float, side: Side, band_pct: float) -> float:
