@@ -93,6 +93,14 @@ contains both triggers it cannot say which came first, and that ordering
 decides the trade. Whether intraday management adds enough to overcome this
 remains untested and requires 1-minute data (issue #13).
 
+**Cannot be verified from this data:** whether the four entry legs' closing
+prices were simultaneously achievable. NSE's closing price is a last-half-hour
+weighted average, so all four legs reflect the same window and should be
+broadly synchronous — but end-of-day files offer no independent source to
+check that against (on non-expiry days `ClsPric` and `SttlmPric` are the same
+number). If entry credits are systematically optimistic, the true result is
+worse than reported, not better.
+
 Also untested here: implied-volatility or regime filters, alternative entry
 timing, and directional or calendar structures.
 
