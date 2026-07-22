@@ -165,3 +165,11 @@ def test_volume_unit_differs_by_exchange():
     assert sensex.contracts == 100.0        # 2000 units / lot 20
     assert nifty.volume == sensex.volume    # the raw field is identical...
     assert nifty.contracts != sensex.contracts   # ...the comparable one is not
+
+
+def test_volume_unit_set_holds_only_verified_indices():
+    """The convention is a property of the index's file, not of its exchange,
+    and it was verified per index against TtlTrfVal. An index in this set that
+    check_index() cannot even accept was never verified against real data."""
+    from optionsbot.calendar import SUPPORTED_INDICES
+    assert bc._VOLUME_IN_UNITS <= set(SUPPORTED_INDICES)
