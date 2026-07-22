@@ -101,13 +101,23 @@ Measured edge inside ±200: **−₹153 to +₹20 per cycle, every CI spanning z
 
 Far-OTM 50-wide condors at ±650/±700/±750:
 
-| | |
-|---|---|
-| t-statistic | **+4.04 / +6.52 / +6.33** |
-| Bootstrap 95% CI | strictly positive: [71, 213] / [103, 188] / [84, 158] |
-| Train → holdout | +₹1,296 → +₹1,107 (**stable**) |
-| Paid out in | **0 of 72 cycles**; worst cycle +₹132 |
-| Drop the 5 best cycles | still +₹826/cycle |
+| | ±650 | ±700 | ±750 |
+|---|---|---|---|
+| t-statistic, **gross** | +6.54 | +6.87 | +6.57 |
+| t-statistic, **net** | **+2.89** | **+2.43** | **+1.38** (CI spans zero) |
+| Net per cycle | +₹75 | +₹52 | +₹25 |
+| Worst single cycle | **−₹463** | +₹132 | +₹132 |
+| Paid out in | 1 of 72 | 0 of 72 | 0 of 72 |
+
+> **Figures corrected 2026-07-22.** This table previously reported t-statistics
+> of +4.04/+6.52/+6.33 without saying they were **gross-basis**; on net the ±750
+> structure is not significant. It also reported a train→holdout of
+> +₹1,296 → +₹1,107 against a ₹230 cost floor and a ₹48 net — which does not
+> reconcile (1,107 − 230 = 877). The correct derivation is gross ₹148 − cost ₹97
+> = **net ₹52**, independently re-derived over 369 grid cells. And "paid out in
+> 0 of 72, worst cycle +₹132" was true at ±700/±750 but not at ±650, which paid
+> out once at −₹463. The sign, the stability and the conclusion are unchanged;
+> the numbers now reconcile.
 
 **This is the only durable edge this project has found.** It is not luck, not an
 outlier artifact, and it survives out of sample — unlike the ATM straddle edge,
@@ -118,9 +128,26 @@ mandate cannot trade.**
 
 Fully costed, the best surviving candidate (±650/700 condor, held to settlement,
 4 orders) nets **+₹48/cycle ≈ 1.4%/yr at zero slippage**, with a median max loss
-of ₹3,600 — **1.8× the cap**, with only 7 of 72 cycles fitting. Real, stable, and
-too small. No experiment rescues it, because the failure is in the *size*, not the
-significance.
+of ₹3,600 — **1.8× the cap**. Real, stable, and too small. And cap-legality is not
+merely rare, it is **arithmetically unavailable**: the 8 of 71 cycles that appeared
+"legal" were lot-25 artifacts from November–December 2024, before the lot rose.
+
+### The ratio that settles it, independent of capital
+
+With one structure at a time and max loss pinned at 2% of capital, annual return
+is `(net / max loss) × 0.02 × 52`. So:
+
+```
+mandate needs      net / max-loss = 19.23% per cycle
+best of 369 cells                    4.22%
+structural ceiling                   5.14%
+```
+
+This is why nothing worked. More capital, more volatility, cheaper brokerage,
+different expiries and every parameter sweep all leave that ratio roughly where it
+is. The asymptote at ₹10 crore is **5.02%/yr — below the do-nothing floor** of
+5.25–6.7%, so the strategy never clears 10%/yr at any capital and the compounding
+question is vacuous.
 
 ## 4. Everything tested and closed
 
@@ -141,10 +168,20 @@ significance.
 
 **SENSEX deserves a note**, because it was the strongest structural lead. Lot 20 ×
 100-point strikes = a risk quantum of **exactly ₹2,000** — verified from live BSE
-bhavcopy, not memory — so the cap stops binding and a genuinely OTM short becomes
-legal. That is the one place the quantum trap disappears. It was tested anyway,
-and it loses. The quantum was necessary but not sufficient: SENSEX's premium is in
-its tail too.
+bhavcopy — so the cap stops binding and a genuinely OTM short becomes legal. That
+is the one place the quantum trap disappears.
+
+The quantum relief is real, and better than expected: friction is **4.9–5.3% of
+the ₹2,000 risk against NIFTY's 18.0%**. But friction/risk is the wrong ratio.
+**Friction/credit is binding, and at 3% out it is 283%**: the SENSEX 100-point
+condor at the distance where the NIFTY edge lives collects a median credit of
+**₹35 against ₹99 of friction — −₹64/cycle before the market moves at all**,
+across 77 cycles. That is a feasibility floor, not a backtest. No edge rescues a
+structure whose credit is below its fee.
+
+Liquidity is not the excuse: 100% of contracts trade out to 5% OTM, median 97,363
+lots at 3%. And this is the *optimistic* case — it assumes hold-to-settlement.
+Active closing doubles friction to ~₹190 and every band except ~1% goes negative.
 
 ## 5. The drawdown cap was never the problem
 
@@ -192,11 +229,31 @@ This cannot rule out:
 - a volatility regime unlike 2024–26 (though the condor's short vega *falls* as
   vol rises — ₹115.4 → ₹71.7 per point at 1.32× IV — so stacking long-run vol
   *and* the optimistic VRP bound still gives only 0.53× of what the mandate needs)
-- event-conditioned entries (budget, RBI policy, elections), never isolated
 - intraday SENSEX behaviour — only EOD was tested, and no retail intraday SENSEX
-  history exists (docs/01)
+  history exists (docs/01), so SENSEX entry timing, spread and fill realism are
+  permanently unmeasurable. BSE also publishes settlement = close for the entire
+  front chain, removing a cross-check NIFTY has.
 - an edge too small to detect at n = 72 — but anything that small cannot fund a
   20% target either
+- extreme volatility: only 25 of 1,619 sessions ever had VIX above 43, and the
+  one window where cap and edge were jointly satisfiable is 6 cycles inside 49
+  days of 2020, two of which lost
+
+**Closed since this document was first written** (2026-07-22):
+
+- **Event-conditioned entry is a genuine null**, not an underpowered one. Implied
+  vol is bid up **+2.38 vol points** before FOMC/RBI/Budget — and realised vol
+  rises **+2.33** alongside it. Net premium difference **+0.05 points,
+  permutation p = 0.965**, with buckets adequately powered (MDE₈₀ ₹289–301 against
+  the ₹619 the mandate needs). Event conditioning also cuts frequency 6×, so it
+  *lowers* annual return.
+- **A higher-volatility regime hurts, it does not help.** Over **6.5 years and 339
+  cycles spanning VIX 9–84**, premium scales with volatility almost perfectly
+  (r = +0.939) but realised P&L does not (r = +0.020). At constant delta the
+  condor nets −₹58/−₹58/−₹56 across low/mid/high vol terciles, and **−₹370/cycle
+  above VIX 25.** Waiting for a better regime is not a strategy.
+- **The crisis risk is a run, not a single cycle.** Worst 4-cycle window:
+  **−₹6,995 = 7% of the account.**
 
 What it does establish: **harvesting the variance risk premium with defined-risk
 index spreads at ₹1 lakh is refuted** — not by a noisy backtest, but by a

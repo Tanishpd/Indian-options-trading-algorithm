@@ -54,6 +54,13 @@ _EXCHANGE_OF = {"NIFTY": "NSE", "SENSEX": "BSE"}
 _MIN_PLAUSIBLE_BYTES = 20_000
 
 
+# Indices whose UDiFF TtlTradgVol is denominated in units (shares) rather than
+# contracts. Verified per index against the file itself, never inferred from the
+# exchange — see EodRow.contracts for the test. Add an index here only after
+# running that test on it.
+_VOLUME_IN_UNITS = frozenset({"SENSEX"})
+
+
 class NoDataForDate(Exception):
     """The exchange published nothing for this date (holiday, weekend, future)."""
 
@@ -83,6 +90,32 @@ class EodRow:
         """False when the contract did not trade — `close` is then a stale
         carried-forward number, not a price anyone could have transacted at."""
         return self.volume > 0
+
+    @property
+    def contracts(self) -> float:
+        """Volume in CONTRACTS, comparable across exchanges.
+
+        `volume` is the raw UDiFF field, and its unit differs by exchange
+        despite the identical schema: **NSE reports contracts, BSE reports
+        units (shares)**. Comparing the raw field across exchanges overstates
+        SENSEX by exactly one lot — 20x at the current lot size — which is
+        enough to make an illiquid strike look tradeable.
+
+        Verified from the files rather than assumed, using the fact that UDiFF
+        `TtlTrfVal` is NOTIONAL turnover (volume x underlying), not premium
+        turnover. Dividing it by the volume interpretation under test and then
+        by `UndrlygPric` must give 1.0. On 2026-07-16 index options:
+
+            SENSEX  (TtlTrfVal / volume) / underlying         = 1.0054
+            NIFTY   (TtlTrfVal / (volume x lot)) / underlying = 1.0096
+
+        Run that test before adding any index to `_VOLUME_IN_UNITS`; the
+        convention is a property of the index's file, not of the exchange, and
+        guessing it wrong is a silent 20x error in either direction.
+        """
+        if self.index in _VOLUME_IN_UNITS and self.lot_size > 0:
+            return self.volume / self.lot_size
+        return float(self.volume)
 
     @property
     def _expiry_day_quirk(self) -> bool:
