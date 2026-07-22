@@ -78,7 +78,14 @@ parameter sweep all failed: none of them move that ratio far enough.
 **Scale of the ask**: 22.5% net at a 10% drawdown cap implies Sharpe ≈ 1.9; at 5%,
 ≈ 3.4. Medallion ran 1.89.
 
-**Closed 2026-07-22** — the last three open doors, now tested rather than assumed:
+**Closed 2026-07-22 (second wave, [docs/13](docs/13-futures-and-hybrids.md))**: single-stock
+options (delivery margin at E-1 is 1.1–2.1× the account, forcing exit before the premium is
+richest), outright futures (one lot is ₹15.73L of notional — you cannot size below it), and
+the delta-hedged options/futures hybrid (**hedging loses even frictionless**, rank correlation
+−0.846: the hedge removes the tail exposure and the premium with it). The trichotomy is now
+closed — buy the tail, hedge the tail, or bear it naked; all three fail at this capital.
+
+**Closed 2026-07-22 (first wave)** — the last three open doors, now tested rather than assumed:
 far-OTM SENSEX (credit ₹35 against ₹99 of friction = −₹64/cycle *before* the market
 moves), event-conditioned entry (a real null: IV +2.38 vol points, RV +2.33, net
 +0.05, p = 0.965), and regime dependence (339 cycles over 6.5 years spanning VIX
