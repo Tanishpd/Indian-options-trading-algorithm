@@ -20,6 +20,7 @@ from ..config import load_config
 from ..feed.angelone import AngelOneFeed
 from ..paper.loop import CollectOnly, PaperSession
 from ..risk.killswitch import KillSwitch
+from ..strategies import registry
 from ..strategies.reference_condor import CondorParams, ReferenceCondor
 from .alerts import TelegramAlerter, discover_chat_id
 from .credentials import load_credentials, load_optional_secret
@@ -112,11 +113,26 @@ def main() -> None:
     ap.add_argument("--telegram-secret",
                     default=os.environ.get("OPTIONSBOT_TELEGRAM_SECRET", "tradingbot/telegram"),
                     help="AWS secret holding TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID")
+    ap.add_argument("--strategy", default=None, metavar="NAME",
+                    help="run one registered strategy live (see --list-strategies)")
+    ap.add_argument("--evaluate", metavar="NAME", action="append", default=None,
+                    help="run a strategy in SHADOW alongside the others; repeatable. "
+                         "Shadows place no real orders and each keeps its own book, "
+                         "so one session yields an independent forward record per "
+                         "strategy. Read them with optionsbot.research.forward_report.")
+    ap.add_argument("--forward-root", default="data/forward",
+                    help="where forward records are written (default data/forward)")
+    ap.add_argument("--list-strategies", action="store_true",
+                    help="print registered strategy names and exit")
     ap.add_argument("--telegram-setup", action="store_true",
                     help="discover + store your chat id, send a test message, exit")
     args = ap.parse_args()
 
     cfg = load_config(args.config)
+    if args.list_strategies:
+        for name, desc in registry.available().items():
+            print(f"  {name:<20} {desc}")
+        return
     if args.telegram_setup:
         telegram_setup(args.telegram_secret, args.aws_region)
         return
@@ -141,6 +157,9 @@ def main() -> None:
 
     if args.collect_only:
         strategy = CollectOnly()
+    elif args.strategy:
+        strategy = registry.build(args.strategy, cfg.risk)
+        print(f"live strategy: {args.strategy} — {registry.available()[args.strategy]}")
     else:
         # 1.0% OTM: at the default 1.5%, live weekly credits (~Rs 16/share) can't
         # satisfy the Rs 2k per-trade cap; ~1.0% earns ~Rs 23+ and passes. The
@@ -163,6 +182,20 @@ def main() -> None:
         poll_seconds=max(args.poll, 5), state_path=Path(args.state),
         page=pager.send if pager else None,
     )
+
+    if args.evaluate:
+        from datetime import date as _date
+
+        from .evaluator import Evaluator
+
+        specs = [(n, registry.build(n, cfg.risk)) for n in args.evaluate]
+        session.evaluator = Evaluator.build(
+            specs, cash=cfg.starting_capital, costs=cfg.costs,
+            per_trade_max_loss=cfg.risk.per_trade_max_loss_rupees,
+            root=Path(args.forward_root), day=_date.today(),
+        )
+        print(f"shadow evaluation: {', '.join(args.evaluate)} "
+              f"-> {args.forward_root} (no real orders)")
 
     if args.once:
         session.feed.connect()

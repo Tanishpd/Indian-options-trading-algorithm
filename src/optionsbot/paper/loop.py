@@ -95,6 +95,10 @@ class PaperSession:
     cfg: AppConfig
     feed: QuoteFeed
     strategy: PaperStrategy
+    # Optional shadow evaluator. Strategies inside it place no real orders and
+    # keep their own books, so adding one cannot change what the live strategy
+    # does — it only writes forward records alongside.
+    evaluator: object | None = None
     index: str = "NIFTY"
     poll_seconds: int = 60
     market_open: time = time(9, 15)
@@ -383,6 +387,15 @@ class PaperSession:
                 lot_size=self.cfg.market.lot_size(self.index, today),
                 strike_step=self.cfg.market.strike_step(self.index),
             )
+            # Shadows observe the same market the live strategy saw, and run
+            # before it trades so a live fill cannot leak into their view. A
+            # failure here must never interrupt the live session.
+            if self.evaluator is not None:
+                try:
+                    self.evaluator.tick(ctx)
+                except Exception as exc:                      # noqa: BLE001
+                    self.log(f"shadow evaluation failed (live unaffected): {exc!r}")
+
             for order in self.strategy.decide(ctx):
                 changed = True
                 if not self._place(order, today, book_by_key):
