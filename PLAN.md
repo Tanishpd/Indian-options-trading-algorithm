@@ -68,8 +68,22 @@ The only durable edge found is a far-OTM condor at ±650/700: statistically
 bulletproof (t = +4.04 to +6.52, holdout holds) and worth **1.4%/yr** at 1.8× the
 cap. Real, stable, too small.
 
+**The ratio that settles it, independent of capital**: with one structure at a
+time and max loss at 2% of capital, annual return = `(net / max loss) × 1.04`. The
+mandate needs **19.23% per cycle**; the best of 369 grid cells is **4.22%** and the
+structural ceiling is **5.14%**. The asymptote at ₹10 crore is 5.02%/yr — below the
+do-nothing floor of 5.25–6.7%. That is why capital, volatility, brokerage and every
+parameter sweep all failed: none of them move that ratio far enough.
+
 **Scale of the ask**: 22.5% net at a 10% drawdown cap implies Sharpe ≈ 1.9; at 5%,
 ≈ 3.4. Medallion ran 1.89.
+
+**Closed 2026-07-22** — the last three open doors, now tested rather than assumed:
+far-OTM SENSEX (credit ₹35 against ₹99 of friction = −₹64/cycle *before* the market
+moves), event-conditioned entry (a real null: IV +2.38 vol points, RV +2.33, net
++0.05, p = 0.965), and regime dependence (339 cycles over 6.5 years spanning VIX
+9–84: premium scales with vol at r = +0.939, realised P&L at r = +0.020, and
+−₹370/cycle above VIX 25 — **a more volatile regime hurts**).
 
 The second study tests the rules the bot actually runs (time-window entry,
 target/stop exits, expiry square-off), which EOD data structurally cannot

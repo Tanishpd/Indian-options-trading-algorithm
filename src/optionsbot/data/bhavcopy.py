@@ -54,6 +54,11 @@ _EXCHANGE_OF = {"NIFTY": "NSE", "SENSEX": "BSE"}
 _MIN_PLAUSIBLE_BYTES = 20_000
 
 
+# Exchanges whose UDiFF TtlTradgVol is denominated in units (shares) rather
+# than contracts. BSE does this; NSE does not. See EodRow.contracts.
+_VOLUME_IN_UNITS = frozenset({"SENSEX", "BANKEX"})
+
+
 class NoDataForDate(Exception):
     """The exchange published nothing for this date (holiday, weekend, future)."""
 
@@ -83,6 +88,21 @@ class EodRow:
         """False when the contract did not trade — `close` is then a stale
         carried-forward number, not a price anyone could have transacted at."""
         return self.volume > 0
+
+    @property
+    def contracts(self) -> float:
+        """Volume in CONTRACTS, comparable across exchanges.
+
+        `volume` is the raw UDiFF field and its unit is exchange-dependent
+        despite the identical schema: **NSE reports contracts, BSE reports
+        units (shares)**. Verified against `TtlTrfVal` on both. Comparing the
+        raw field across exchanges overstates SENSEX by exactly one lot — 20x
+        at the current lot size — which is enough to turn an illiquid strike
+        into an apparently liquid one. Always compare on this property.
+        """
+        if self.index in _VOLUME_IN_UNITS and self.lot_size > 0:
+            return self.volume / self.lot_size
+        return float(self.volume)
 
     @property
     def _expiry_day_quirk(self) -> bool:
