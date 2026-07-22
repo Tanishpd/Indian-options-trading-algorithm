@@ -14,3 +14,4 @@ docs/decisions/
 .DS_Store
 # local agent/tooling config — not part of the published project
 CLAUDE.md
+/data/forward/

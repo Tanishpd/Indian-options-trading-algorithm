@@ -134,6 +134,46 @@ Weekly review ritual (docs/06):
 - Drawdown tracking against the cap.
 - **No mid-run parameter changes.** A change resets the 3–6 month paper clock.
 
+## 5b. Evaluating strategies on forward data
+
+Backtests on this project produced six positive results that dissolved under
+inspection ([docs/10](docs/10-first-backtest-findings.md)–[13](docs/13-futures-and-hybrids.md)),
+because a backtest is scored on data that already existed when the rules were
+written. A forward record cannot be overfit — the observations do not exist yet.
+
+```bash
+python -m optionsbot.paper --list-strategies
+
+# run one strategy live, and evaluate two others in shadow alongside it
+python -m optionsbot.paper --strategy reference-condor \
+    --evaluate tail-condor --evaluate reference-condor
+
+# read the accumulated record
+python -m optionsbot.research.forward_report data/forward
+```
+
+Shadows place **no real orders**. Each keeps its own broker, cash and book, so
+they cannot see or affect one another or the live strategy, and one session
+produces an independent forward record per strategy. A shadow that raises is
+halted and recorded; the others and the live session continue.
+
+Shadows are held to the same invariants as the live engine — no naked exposure,
+and the per-trade cap applied to the **completed order batch** rather than to
+each leg. A shadow allowed to do what the real engine would refuse is not
+evaluating a strategy; it is evaluating one nobody could run.
+
+**Reading the report.** It leads with the number of observations and the effect
+size that sample could detect, and it refuses to assess a record with fewer than
+30 completed cycles. That threshold is deliberately uncomfortable. It also flags
+when the top 3 cycles carry more than 60% of P&L, which is the shape every false
+positive in this project had.
+
+One thing the report cannot do, stated in its output: a healthy t-statistic
+cannot rule out a short-gamma tail that has not occurred yet. A naked strangle
+showed 21.5%/yr at t = 2.49 with the holdout holding, and one gap would have
+ended the account ([docs/13](docs/13-futures-and-hybrids.md)). Always read the
+worst observed cycle and ask what twice that move would do.
+
 ## 6. Live operations (Phase 6)
 
 Pre-market checklist (automate, but keep manually runnable):
