@@ -161,6 +161,10 @@ So the honest options narrow to three, unchanged by this run:
   methodology, not a vendor's backtest) and **buy the fund**. Simplest, and what
   the evidence best supports.
 - **Buy paid long-history equity data** and run the real backtest here — the
-  toolchain is built and proven; only the data is missing.
+  toolchain is built and proven; only the data is missing. (Angel One's
+  SmartAPI `getCandleData` is a partial free route: `fetch_angel_history` pulls
+  daily candles back further than the UDiFF, from the whitelisted box, when no
+  live session holds the token. It still needs a point-in-time universe to be a
+  verdict rather than a ceiling.)
 - **Forward-test live** from today and accumulate your own record, which is the
   one form of evidence this project has shown can always be trusted.
