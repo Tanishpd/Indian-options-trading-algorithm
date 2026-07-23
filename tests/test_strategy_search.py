@@ -6,6 +6,7 @@ when its config is the default. If it drifts, every overlay comparison is agains
 a different base and the whole search is meaningless. The STCG accounting is
 pinned to a hand-computed rupee figure.
 """
+from dataclasses import replace
 from datetime import date, timedelta
 
 import pytest
@@ -164,6 +165,59 @@ def test_residual_pair_captures_idiosyncratic_drift():
     assert a_pair is not None and t_pair is not None
     assert a_pair[0] > 0.5 and a_pair[1] > 0.5    # drift shows up (was ~0 when buggy)
     assert abs(t_pair[0]) < 0.5                    # tracker has no drift
+
+
+# -- trailing stop (intra-month exit) -------------------------------------
+
+def _crash_universe():
+    """One stock: enough Jan history to be scored, bought at 100, climbs to 120,
+    then crashes to 80 over the first days of Feb."""
+    jan = [date(2025, 1, d) for d in range(20, 32)]       # 20..31, rebalance on 31
+    feb = [date(2025, 2, d) for d in range(1, 6)]         # 1..5, rebalance on 5
+    ds = tuple(jan + feb)
+    a = (90, 92, 94, 96, 98, 100, 102, 104, 106, 108, 110, 100,   # Jan history, buy @100
+         110, 120, 100, 90, 80)                                    # Feb: peak 120 -> crash
+    return {"A": Series("A", ds, a)}
+
+
+def test_per_stock_trailing_stop_exits_a_crashing_winner():
+    cfg = StrategyConfig(name="ts", top_n=1, lookback_short=2, lookback_long=3,
+                         regime_mode="none", trail_stop_mode="per_stock",
+                         trail_stop_pct=0.15)
+    stop = run_strategy(_crash_universe(), index=None, cfg=cfg, costs=FREE)
+    none = run_strategy(_crash_universe(), index=None,
+                        cfg=replace(cfg, trail_stop_mode="none"), costs=FREE)
+    sc = dict(stop.equity_curve)
+    # It must HOLD through the run-up (not stop early), then exit on the breach:
+    assert sc[date(2025, 2, 1)] == pytest.approx(550_000.0)   # still holding at 110
+    assert sc[date(2025, 2, 2)] == pytest.approx(600_000.0)   # still holding at the 120 peak
+    # Peak 120 on Feb 2; Feb 3 close 100 breaches 120*0.85=102 -> exit to cash.
+    assert sc[date(2025, 2, 4)] == pytest.approx(500_000.0)   # in cash, dodged the 90
+    assert dict(none.equity_curve)[date(2025, 2, 4)] == pytest.approx(450_000.0)  # rode it
+    assert stop.end_equity == pytest.approx(500_000.0)
+    assert none.end_equity == pytest.approx(400_000.0)
+    assert stop.end_equity > none.end_equity
+
+
+def test_portfolio_trailing_stop_liquidates_on_equity_drawdown():
+    cfg = StrategyConfig(name="pt", top_n=1, lookback_short=2, lookback_long=3,
+                         regime_mode="none", trail_stop_mode="portfolio",
+                         trail_stop_pct=0.15)
+    res = run_strategy(_crash_universe(), index=None, cfg=cfg, costs=FREE)
+    # Equity peak 6L (Feb 2); Feb 3 at 5L breaches 6L*0.85=5.1L -> liquidate all.
+    assert dict(res.equity_curve)[date(2025, 2, 4)] == pytest.approx(500_000.0)
+    assert res.end_equity == pytest.approx(500_000.0)
+
+
+def test_trailing_stop_none_is_inert():
+    """The stop code must be byte-identical to base when disarmed."""
+    cfg = StrategyConfig(name="n", top_n=1, lookback_short=2, lookback_long=3,
+                         regime_mode="none")
+    a = run_strategy(_crash_universe(), index=None, cfg=cfg, costs=EquityCostConfig())
+    b = run_strategy(_crash_universe(), index=None,
+                     cfg=replace(cfg, trail_stop_mode="none", trail_stop_pct=0.0),
+                     costs=EquityCostConfig())
+    _curves_equal(a.equity_curve, b.equity_curve)
 
 
 # -- every mode at least runs and stays solvent (integration smoke) --------
