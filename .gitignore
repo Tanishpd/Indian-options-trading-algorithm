@@ -16,3 +16,6 @@ docs/decisions/
 CLAUDE.md
 /data/forward/
 /data/equity/
+
+# Claude Code agent worktrees / local state
+.claude/
