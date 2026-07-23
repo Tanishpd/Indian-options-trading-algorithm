@@ -4,10 +4,12 @@ The integrity test enforces the discipline in code: exactly 20 configs, base
 first, unique names, every candidate carrying an ex-ante mechanism. If someone
 appends a 21st config after seeing results, this test is where it should hurt.
 """
-from datetime import date
+from datetime import date, timedelta
 
+from optionsbot.data.equity import Series
 from optionsbot.research.search_configs import PREREGISTERED
-from optionsbot.research.run_indicator_search import monthly_in_window, align_matrix
+from optionsbot.research.run_indicator_search import (
+    monthly_in_window, align_matrix, fetch_windows, index_covers_window)
 
 
 def test_preregistration_is_frozen_and_well_formed():
@@ -32,6 +34,29 @@ def test_monthly_in_window_lo_exclusive_hi_inclusive():
     # lo=2022-09-30 exclusive drops the 09-30 mark; hi=2025-06-30 drops the holdout.
     assert monthly_in_window(m, date(2022, 9, 30), date(2025, 6, 30)) == [0.03]
     assert monthly_in_window(m, date(2022, 9, 30), None) == [0.03, 0.04]
+
+
+def test_fetch_windows_are_contiguous_with_no_gap():
+    """Regression guard for the index-cache hole: consecutive fetch windows must
+    abut exactly (next lo = prev hi + 1 day), covering the whole range."""
+    wins = fetch_windows(date(2016, 1, 1), date(2026, 7, 23), years=5)
+    assert wins[0][0] == date(2016, 1, 1)
+    assert wins[-1][1] == date(2026, 7, 23)
+    for (_, hi), (lo2, _) in zip(wins, wins[1:]):
+        assert lo2 == hi + timedelta(days=1)          # no gap, no overlap
+    # The original bug produced a 5-year hole; assert full coverage instead.
+    assert all(a <= b for a, b in wins)
+
+
+def test_index_coverage_guard_rejects_a_holey_index():
+    ds = ([date(2020, 1, 1) + timedelta(days=i) for i in range(400)]        # 2020-21
+          + [date(2026, 1, 1) + timedelta(days=i) for i in range(60)])      # 2026 only
+    holey = Series("IDX", tuple(ds), tuple(100.0 + i for i in range(len(ds))))
+    # Nothing in 2022-09..2025-07 -> must be rejected.
+    assert not index_covers_window(holey, date(2022, 9, 30), date(2025, 7, 1))
+    full = [date(2018, 1, 1) + timedelta(days=i) for i in range(3000)]
+    good = Series("IDX", tuple(full), tuple(100.0 + i for i in range(len(full))))
+    assert index_covers_window(good, date(2022, 9, 30), date(2025, 7, 1))
 
 
 def test_align_matrix_equal_length_rows_on_common_dates():
