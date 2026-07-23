@@ -49,11 +49,52 @@ Momentum meets the first and strains the second:
 
 A 30% drawdown **is** losing a large fraction, temporarily. This is not a defect
 to engineer away — it is the price of the return. The **200-day regime filter**
-(hold cash whenever the index is below its 200-DMA) roughly **halves** the
-drawdown, per both the framework and Raju & Chandrasekaran (2019). On this
-project's synthetic validation it cut a modelled drawdown from 30.8% to 23.8%.
-Even filtered, expect 15–20% drawdowns. There is no version of this that returns
-19% and never falls 15%.
+(hold cash whenever the index is below its 200-DMA) reduces the drawdown, per the
+framework, Raju & Chandrasekaran (2019), and — now — this project's own backtest
+on real data (below). There is no version of this that returns ~20% and never
+falls ~20%.
+
+## The real backtest (July 2026) — measured on this project's own data
+
+Run on ₹5,00,000 over **2017-01-02 → 2026-07-16 (9.5 years, 115 monthly
+rebalances)**, using Angel One daily history for 254 of the 258 stocks that were
+ever in the Nifty 200 over 2022–2026, with point-in-time membership applied from
+2022-09-30 (the free NSE reconstruction) and the **real NIFTY 50** as the regime
+benchmark:
+
+| Configuration | CAGR | Max DD | Sharpe |
+|---|---:|---:|---:|
+| Fixed universe (survivorship-biased ceiling) | 34.1% | 28.1% | 1.64 |
+| Fixed universe + regime | 24.8% | 29.4% | 1.41 |
+| **Point-in-time, no regime** | **29.9%** | 28.1% | 1.51 |
+| **Point-in-time + real regime filter** | **23.6%** | **21.3%** | **1.51** |
+
+What this establishes, honestly:
+
+1. **Survivorship bias is real and measurable.** Correcting it (fixed → PIT) took
+   the raw 34.1% down to 29.9% — a ~4-point overstatement, concentrated in the
+   2022+ window where the membership schedule applies. Raw backtests overstate.
+2. **The edge survives the correction.** Even PIT-corrected, momentum returns
+   ~24–30% CAGR gross — well above the 15% target and NIFTY's ~12%. This is the
+   strongest evidence in the project that a reachable edge exists.
+3. **The regime filter works, and Sharpe reveals why.** With the *real* index (a
+   first attempt with a crude equal-weight proxy gave bad signals and did not
+   help), the filter cut max drawdown **28.1% → 21.3%** for ~6 points of CAGR,
+   holding **Sharpe flat at 1.51** — it trades return for drawdown one-for-one in
+   risk-adjusted terms, which is exactly a regime filter's job. Note the framework's
+   "halves the drawdown" is overstated: the real reduction here is ~24%, not 50%.
+
+Caveats that keep this short of a final verdict, none of them small:
+
+- **Only 2022+ is point-in-time-clean.** The earlier ~5 years still fall back to
+  the survivorship-biased union universe, so the true long-run CAGR is likely
+  somewhat below 23.6%, and the pre-2022 span also misses stocks that left the
+  index before 2022 (a deeper survivorship layer).
+- **Gross of STCG.** ~115 round trips at monthly turnover; short-term
+  capital-gains tax pulls the ~23.6% down toward the high-teens net, possibly
+  lower — the single largest unmodelled haircut.
+- **21% is still a real drawdown.** Better than 28%, but "capital preservation
+  matters" and a one-fifth temporary loss is not nothing.
 
 ## What was built
 
@@ -108,24 +149,46 @@ repo.** The verdict is only as honest as the universe fed to it:
    fitted to before a rupee is at risk. Every positive backtest in this project's
    history dissolved on inspection; this one has not yet earned an exception.
 
-## The three ways to act on this
+## The decision: fund vs bot
 
-1. **Simplest, and what the evidence best supports: buy the index fund.** The
-   HDFC NIFTY 200 Momentum 30 Index Fund *is* the strategy, professionally run —
-   zero code, zero execution risk, ~12–16% net at ~30% drawdown. "Automated" in
-   the truest sense.
-2. **The bot the owner asked for:** the rules above, automated on this repo's
-   infrastructure. Real, buildable, and the harness generalises to it — but it is
-   an equity strategy, so it needs the equity data path and a point-in-time
-   universe before its numbers mean anything.
-3. **Forward-test first, decide later.** Run it live in shadow for months, then
-   choose. Costs nothing but time, and it is the only test this project's history
-   says can be trusted.
+The strategy question is now answered. Momentum on Indian equities is a real,
+reachable edge that beats the target, and the regime filter provides real (if
+overstated-by-the-framework) drawdown protection. What remains is *how to hold
+it* — and the two options deliver nearly the same economics:
+
+**Option A — buy the fund.** The HDFC NIFTY 200 Momentum 30 Index Fund *is* this
+strategy, professionally run. Zero code, zero execution risk, **no STCG drag**
+(a fund rebalances internally without triggering your capital-gains tax on every
+rotation — this alone is worth several points a year versus running it yourself),
+zero tax-lot bookkeeping. ~12–16% net at ~25–30% drawdown. "Automated" in the
+truest sense: you never touch it.
+
+**Option B — run the bot.** The rules above on this repo's infrastructure. The
+code is built, tested, and shipped; the data path is proven; the point-in-time
+universe is reconstructed. But: **you pay STCG on every monthly rotation** (the
+biggest reason B nets less than A), you carry execution and outage risk, and you
+own the tax-lot accounting. Its one genuine advantage over the fund is *control*
+— you can tune the regime filter, the universe, the rebalance cadence — which
+matters only if you have a specific improvement in mind and the discipline to
+forward-test it before trusting it.
+
+**The honest recommendation:** unless you specifically want to tune the strategy,
+**Option A wins on the numbers** — the fund's internal-rebalancing tax advantage
+alone roughly cancels the bot's control advantage, and it removes every
+operational risk. Build the bot if the *building* is the point (learning, control,
+a thesis to test); buy the fund if the *returns* are the point.
+
+**Option C, and the only test this project's history fully trusts — forward-test
+first.** Whichever you lean toward, the shadow harness (docs/13) can run the
+momentum bot live for months against data it was never fitted to, before a rupee
+is committed. Every positive backtest in this project dissolved on inspection;
+this one is the strongest yet, but it has not earned an exception to that rule.
 
 The mandate as originally written (₹1 lakh, 20–25%, 5–10% drawdown, options) was
 refuted. Momentum is the honest answer to the *revised* question (₹3–5 lakh,
-≥15%, automated) — provided the owner accepts the drawdown that comes with it.
-That trade-off, not the code, is the decision.
+≥15%, automated) — **provided the owner accepts a ~21% drawdown and the tax drag.**
+That trade-off, not the code, is the decision, and it is now the owner's alone to
+make.
 
 ## Exploratory run on real data — and the data-source ceiling it exposed
 
