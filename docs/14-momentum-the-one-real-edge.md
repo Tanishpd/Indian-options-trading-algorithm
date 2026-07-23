@@ -88,12 +88,18 @@ repo.** The verdict is only as honest as the universe fed to it:
    reads. What is still missing is a **benchmark index series** for the regime
    filter (the CM file has stocks, not indices — source NIFTY 50 separately) and
    the universe list below.
-2. **Survivorship bias is the remaining trap, and it is a data problem, not a
-   code one.** `fetch_equity` takes a `--universe` file; feed it a **point-in-time
-   Nifty 200 membership** list (the index as it stood on each date, not today).
-   A **current** list applied to history silently drops every stock that fell out
-   of the index, which overstates the result, sometimes severely. Without a
-   point-in-time list, any run is an optimistic ceiling and must be labelled so.
+2. **Survivorship bias — the code half is now done; only the data remains.** The
+   backtest accepts a **point-in-time membership schedule** (`backtest(...,
+   membership=...)`, loaded from dated `YYYY-MM-DD.txt` index snapshots via
+   `equity.load_membership`; `run_momentum --membership <dir>`). With it, each
+   rebalance picks from the index as it actually stood then, so stocks that fell
+   out — the failures — are included over the span they were members and dropped
+   after. Without it, the whole supplied universe is eligible on every date,
+   which silently keeps only survivors and overstates the result. The remaining
+   input is the schedule itself: NSE reconstitutes the Nifty 200 semi-annually,
+   so ~2 snapshots/year reconstructed from its reconstitution circulars is
+   enough. Until that schedule is supplied, every run is an optimistic ceiling
+   and is labelled so in the driver output.
 3. **STCG tax is not modelled.** The backtest is gross of tax; short-term equity
    gains are taxed at the prevailing rate (15% historically). Apply that haircut
    to the CAGR for a net figure.

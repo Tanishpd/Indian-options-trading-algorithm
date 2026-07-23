@@ -28,6 +28,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--top", type=int, default=30)
     ap.add_argument("--no-regime", action="store_true",
                     help="disable the 200-DMA cash filter (shows the raw drawdown)")
+    ap.add_argument("--membership", type=Path, default=None,
+                    help="dir of YYYY-MM-DD.txt index snapshots (point-in-time "
+                         "universe — removes survivorship bias; docs/14)")
     args = ap.parse_args(argv)
 
     series = read_dir(args.universe)
@@ -36,15 +39,18 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     index = read_series(args.index) if args.index else None
 
+    membership = load_membership(args.membership) if args.membership else None
     params = MomentumParams(top_n=args.top, use_regime_filter=not args.no_regime)
-    res = backtest(series, index, params, EquityCostConfig(), args.capital)
+    res = backtest(series, index, params, EquityCostConfig(), args.capital,
+                   membership=membership)
 
     if not res.equity_curve:
         print("no trading days in the supplied data", file=sys.stderr)
         return 1
 
     start_d, end_d = res.equity_curve[0][0], res.equity_curve[-1][0]
-    print(f"universe {len(series)} symbols  |  {start_d} .. {end_d}  "
+    pit = "point-in-time index" if membership else "FIXED universe (survivorship-biased)"
+    print(f"universe {len(series)} symbols [{pit}]  |  {start_d} .. {end_d}  "
           f"({res.years:.1f} yr)  |  regime filter "
           f"{'ON' if params.use_regime_filter else 'OFF'}")
     print(f"  start        Rs {res.start_capital:>12,.0f}")

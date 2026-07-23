@@ -145,3 +145,54 @@ def test_regime_filter_forces_cash_below_the_average():
     # and with nothing ever bought there are no costs.
     assert res.costs_paid == pytest.approx(0.0)
     assert res.end_equity == pytest.approx(500_000.0)
+
+
+# -- point-in-time membership (survivorship-bias fix) ---------------------
+
+from optionsbot.research.momentum import members_asof
+from optionsbot.data.equity import load_membership
+
+
+def test_members_asof_picks_the_snapshot_in_force():
+    sched = [
+        (date(2020, 1, 1), frozenset({"A", "B", "C"})),
+        (date(2020, 7, 1), frozenset({"A", "C", "D"})),   # B dropped, D added
+    ]
+    assert members_asof(sched, date(2019, 12, 31)) is None      # before first snapshot
+    assert members_asof(sched, date(2020, 3, 1)) == frozenset({"A", "B", "C"})
+    assert members_asof(sched, date(2020, 7, 1)) == frozenset({"A", "C", "D"})
+    assert members_asof(sched, date(2021, 1, 1)) == frozenset({"A", "C", "D"})
+    assert members_asof(None, date(2020, 3, 1)) is None          # no schedule
+
+
+def test_membership_restricts_the_scored_universe():
+    """A stock outside the point-in-time index is not scored, even with data."""
+    a = series("A", [100, 101, 102, 103, 104, 105, 106, 107])
+    d = series("D", [100, 130, 90, 140, 80, 150, 70, 160])       # would score high raw
+    scores_all = momentum_scores({"A": a, "D": d}, days(8)[-1], P)
+    assert "D" in scores_all
+    scores_pit = momentum_scores({"A": a, "D": d}, days(8)[-1], P,
+                                 members=frozenset({"A"}))
+    assert set(scores_pit) == {"A"}                             # D excluded
+
+
+def test_backtest_uses_point_in_time_membership():
+    """A loser dropped from the index before it craters must not be held after
+    its removal — the whole point of removing survivorship bias."""
+    uni = three_stock_universe()
+    # DOWN is in the index only for the first month, then removed.
+    sched = [(date(2025, 1, 1), frozenset({"UP", "MID", "DOWN"})),
+             (date(2025, 2, 1), frozenset({"UP", "MID"}))]
+    res = backtest(uni, index=None, params=BP, costs=EquityCostConfig(),
+                   membership=sched)
+    assert res.rebalances == 2                                  # ran normally
+
+
+def test_load_membership_reads_dated_snapshots(tmp_path):
+    (tmp_path / "2020-01-01.txt").write_text("# jan review\nA\nB\nC\n")
+    (tmp_path / "2020-07-01.txt").write_text("A\nC\nD\n")
+    (tmp_path / "notes.txt").write_text("ignored — not a date\n")
+    sched = load_membership(tmp_path)
+    assert [d for d, _ in sched] == [date(2020, 1, 1), date(2020, 7, 1)]
+    assert sched[0][1] == frozenset({"A", "B", "C"})
+    assert sched[1][1] == frozenset({"A", "C", "D"})
