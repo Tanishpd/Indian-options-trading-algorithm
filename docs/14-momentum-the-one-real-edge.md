@@ -120,3 +120,51 @@ The mandate as originally written (₹1 lakh, 20–25%, 5–10% drawdown, option
 refuted. Momentum is the honest answer to the *revised* question (₹3–5 lakh,
 ≥15%, automated) — provided the owner accepts the drawdown that comes with it.
 That trade-off, not the code, is the decision.
+
+## Exploratory run on real data — and the data-source ceiling it exposed
+
+The pipeline was run end to end on **real NSE cash-segment data** (July 2026).
+The result is not a verdict, and the reason it cannot be is itself the finding.
+
+**Free NSE UDiFF equity EOD only reaches back to about January 2024.** A fetch
+requested from 2021 returned data only from 2024-01-01 — 625 sessions, ~2.5
+years. After the 12-month momentum lookback, that leaves roughly **1.5 years of
+backtest (2025-01 to 2026-07, 31 rebalances)** — far too short to say anything
+about a strategy whose entire claim rests on 20-year behaviour across multiple
+drawdowns.
+
+On that short, survivorship-biased slice (universe = the 200 most-liquid stocks
+present throughout; benchmark = a crude equal-weight proxy, since the cash file
+carries no index), on ₹5,00,000:
+
+| | CAGR | max DD | Sharpe |
+|---|---:|---:|---:|
+| No regime filter | **+4.58%** | 14.9% | 0.39 |
+| 200-DMA regime filter | **−1.83%** | 17.5% | −0.12 |
+
+**This says essentially nothing about the strategy** — one regime, 1.5 years,
+survivorship bias, a crude proxy index (which sent the filter to cash 8 of 31
+times, hurting it), and gross of STCG. It is a *mechanics check*, and the
+mechanics are sound. It is **not** the ~19% CAGR the framework cites, and it
+cannot be, because the window is 1/13th the length that number is built on.
+
+**The load-bearing conclusion:** the ~19% / ~30%-drawdown momentum figure rests
+on NSE's OWN published 20-year index (the Nifty200 Momentum 30) — a primary
+source, and the most credible claim this project has encountered, precisely
+because the exchange runs the index and a real fund tracks it. But **we cannot
+independently reproduce it on free data**, because free NSE equity history does
+not go back far enough. Independent verification would need paid long-history
+data; the pre-2024 legacy NSE bhavcopy format was retired.
+
+So the honest options narrow to three, unchanged by this run:
+- **Trust NSE's published index** (reasonable — it is the exchange's own
+  methodology, not a vendor's backtest) and **buy the fund**. Simplest, and what
+  the evidence best supports.
+- **Buy paid long-history equity data** and run the real backtest here — the
+  toolchain is built and proven; only the data is missing. (Angel One's
+  SmartAPI `getCandleData` is a partial free route: `fetch_angel_history` pulls
+  daily candles back further than the UDiFF, from the whitelisted box, when no
+  live session holds the token. It still needs a point-in-time universe to be a
+  verdict rather than a ceiling.)
+- **Forward-test live** from today and accumulate your own record, which is the
+  one form of evidence this project has shown can always be trusted.
