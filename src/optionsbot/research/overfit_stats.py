@@ -306,3 +306,90 @@ def reality_check_pvalue(candidate_matrix: Sequence[Sequence[float]],
         if v_star >= v_obs:
             count += 1
     return (count + 1) / (n_boot + 1)
+
+# -- Romano-Wolf stepdown (FWER control) ----------------------------------
+
+def romano_wolf_pvalues(candidate_matrix: Sequence[Sequence[float]],
+                        base_vector: Sequence[float], block_len: float = 6.0,
+                        n_boot: int = 5000, seed: int = 0) -> list[float]:
+    """Romano-Wolf (2005) stepdown FWER-adjusted p-values.
+
+    Tests, for each of K candidates, the one-sided hypothesis
+        H_k: candidate k does NOT beat the base (higher return = better),
+    and returns a p-value per candidate that controls the family-wise error
+    rate across all K tests. Unlike White's Reality Check (a single-step max
+    test that yields ONE p-value for the whole family), this returns K adjusted
+    p-values and is uniformly more powerful than the single-step Bonferroni/RC
+    correction because the max is taken over a SHRINKING active set as the
+    stepdown proceeds.
+
+    Performance differential f[k][t] = candidate[k][t] - base[t]; d_bar[k] its
+    mean, sd[k] its sample stdev (ddof=1; a zero sd is floored to a tiny
+    epsilon so the studentised statistic stays finite). The studentised
+    observed statistic is tstat[k] = sqrt(T) * d_bar[k] / sd[k].
+
+    A single stationary-bootstrap index path (Politis-Romano, same construction
+    and seeding as reality_check_pvalue) is drawn per replication and SHARED
+    across all k, so the cross-strategy correlation is preserved. Each
+    replication's statistic is recentred at the null by subtracting the
+    original d_bar[k]:
+        tstar[k][b] = sqrt(T) * (mean_t f[k][path_b] - d_bar[k]) / sd[k].
+
+    Stepdown: order candidates by tstat descending (r1..rK). With 'active'
+    initially all candidates, for r taken in that order,
+        padj[r] = mean_b( max_{j in active} tstar[j][b] >= tstat[r] ),
+    clamped up to the previous stepdown p-value (monotone non-decreasing along
+    the order), after which r is dropped from active. Returned in the ORIGINAL
+    candidate order. Deterministic in seed.
+    """
+    k = len(candidate_matrix)
+    t = len(base_vector)
+    if k == 0:
+        return []
+    if t == 0:
+        return [1.0] * k
+
+    f = [[candidate_matrix[j][i] - base_vector[i] for i in range(t)] for j in range(k)]
+    d_bar = [statistics.mean(f[j]) for j in range(k)]
+    sd = []
+    for j in range(k):
+        s = statistics.stdev(f[j]) if t >= 2 else 0.0
+        sd.append(s if s > 0.0 else 1e-12)
+
+    sqrt_t = math.sqrt(t)
+    tstat = [sqrt_t * d_bar[j] / sd[j] for j in range(k)]
+
+    # Recentred bootstrap statistics: tstar[j] is a list over the n_boot draws,
+    # sharing one common index path per draw across all candidates.
+    rng = Random(seed)
+    tstar = [[0.0] * n_boot for _ in range(k)]
+    for b in range(n_boot):
+        path = _stationary_path(rng, t, block_len)
+        for j in range(k):
+            fj = f[j]
+            boot_mean = sum(fj[i] for i in path) / t
+            tstar[j][b] = sqrt_t * (boot_mean - d_bar[j]) / sd[j]
+
+    # Stepdown adjusted p-values. Candidates are removed in descending-tstat
+    # order, so the 'active' set at every step is a SUFFIX of that order and
+    # max_{j in active} tstar[j][b] is a suffix-max — computed in one bottom-up
+    # pass (O(K*n_boot)) instead of the naive O(K^2*n_boot), which matters at
+    # K~800. Result is identical to recomputing the max over the active set.
+    order = sorted(range(k), key=lambda j: tstat[j], reverse=True)
+    cur = [float("-inf")] * n_boot            # running suffix-max over order[m:]
+    p_by_order = [0.0] * k
+    for m in range(k - 1, -1, -1):
+        col = tstar[order[m]]
+        for b in range(n_boot):
+            if col[b] > cur[b]:
+                cur[b] = col[b]
+        stat_m = tstat[order[m]]
+        p_by_order[m] = sum(1 for b in range(n_boot) if cur[b] >= stat_m) / n_boot
+
+    padj = [0.0] * k
+    prev = 0.0
+    for m in range(k):                        # monotone clamp along the order
+        p = p_by_order[m] if p_by_order[m] > prev else prev
+        padj[order[m]] = p
+        prev = p
+    return padj

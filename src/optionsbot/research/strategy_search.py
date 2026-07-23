@@ -80,6 +80,11 @@ class StrategyConfig:
     exposure_floor: float = 0.0
     exposure_cap: float = 1.0
 
+    # -- trailing stop (intra-month exit, the risk axis) --
+    trail_stop_mode: str = "none"      # none|per_stock|portfolio
+    trail_stop_pct: float = 0.0        # exit if price/equity falls this far from its
+                                       # trailing peak since the last rebalance mark
+
     # -- tax --
     apply_stcg: bool = False
     stcg_rate: float = 0.20            # short-term capital gains, realised annually
@@ -386,6 +391,8 @@ def run_strategy(series: dict[str, Series], index: Series | None,
     shares: dict[str, float] = {}
     basis: dict[str, float] = {}          # average cost per share, for realised gains
     disp_hist: list[float] = []
+    peak: dict[str, float] = {}           # per-stock trailing peak since last rebalance
+    port_peak = 0.0                       # portfolio-equity trailing peak
     res = StrategyResult([], start_capital)
 
     fy_realized = 0.0                      # realised short-term gains this fiscal year
@@ -417,6 +424,23 @@ def run_strategy(series: dict[str, Series], index: Series | None,
         else:
             loss_carry += -net
         fy_realized = 0.0
+
+    def sell_all(sym: str, day: date) -> None:
+        """Liquidate a position to cash at the day's close, charging the cost and
+        realising the gain — the intra-month trailing-stop exit."""
+        nonlocal cash, fy_realized
+        px = close_on(sym, day)
+        q = shares.get(sym, 0.0)
+        if px is None or px <= 0 or q <= 0:
+            return
+        val = q * px
+        c = trade_cost(val, is_buy=False, cfg=costs)
+        cash -= c
+        res.costs_paid += c
+        fy_realized += q * (px - basis.get(sym, px))
+        cash += val
+        shares.pop(sym, None)
+        basis.pop(sym, None)
 
     for day in days:
         if cfg.apply_stcg:
@@ -468,6 +492,27 @@ def run_strategy(series: dict[str, Series], index: Series | None,
             basis = {k: v for k, v in basis.items() if k in shares}
             res.rebalances += 1
             res.turnover_fracs.append(traded / equity if equity > 0 else 0.0)
+            if cfg.trail_stop_mode != "none":       # re-arm the stop off the new marks
+                peak = {s: close_on(s, day) for s in shares if close_on(s, day)}
+                port_peak = portfolio_value(day)
+
+        # trailing-stop exits (intra-month, path-dependent). Freed cash idles until
+        # the next rebalance re-ranks — a stopped name is not re-bought mid-month.
+        if cfg.trail_stop_mode == "per_stock" and cfg.trail_stop_pct > 0.0:
+            for sym in list(shares):
+                px = close_on(sym, day)
+                if px is None or px <= 0:
+                    continue
+                pk = peak[sym] = max(peak.get(sym, px), px)
+                if px <= pk * (1.0 - cfg.trail_stop_pct):
+                    sell_all(sym, day)
+                    peak.pop(sym, None)
+        elif cfg.trail_stop_mode == "portfolio" and cfg.trail_stop_pct > 0.0:
+            eq = portfolio_value(day)
+            port_peak = max(port_peak, eq)
+            if shares and eq <= port_peak * (1.0 - cfg.trail_stop_pct):
+                for sym in list(shares):
+                    sell_all(sym, day)
 
         res.equity_curve.append((day, portfolio_value(day)))
 

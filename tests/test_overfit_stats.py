@@ -13,8 +13,8 @@ import pytest
 
 from optionsbot.research.overfit_stats import (
     cscv_pbo, deflated_sharpe_ratio, expected_max_sharpe, normal_cdf,
-    normal_ppf, probabilistic_sharpe_ratio, reality_check_pvalue, sharpe,
-    skew_kurt)
+    normal_ppf, probabilistic_sharpe_ratio, reality_check_pvalue,
+    romano_wolf_pvalues, sharpe, skew_kurt)
 
 
 # -- Normal distribution --------------------------------------------------
@@ -172,4 +172,90 @@ def test_reality_check_is_deterministic_in_seed():
     cands = [[b + 0.05 * rng.gauss(0, 1) for b in base] for _ in range(4)]
     p1 = reality_check_pvalue(cands, base, seed=123)
     p2 = reality_check_pvalue(cands, base, seed=123)
+    assert p1 == p2
+
+def _rw_tstats(cands, base):
+    """Studentised observed statistics, computed exactly as the function does,
+    so tests can order candidates by the same key the stepdown uses."""
+    T = len(base)
+    out = []
+    for c in cands:
+        f = [c[i] - base[i] for i in range(T)]
+        dbar = statistics.mean(f)
+        sd = statistics.stdev(f) if len(f) >= 2 else 0.0
+        sd = sd if sd > 0.0 else 1e-12
+        out.append(math.sqrt(T) * dbar / sd)
+    return out
+
+
+def test_romano_wolf_all_identical_all_large():
+    """Every candidate identical to the base: the differential is zero
+    everywhere, so every observed and every bootstrap statistic is 0. At each
+    step 0 >= 0 holds on every draw, so all adjusted p-values are 1.0 (well
+    above 0.5) -- nothing is flagged as a real edge."""
+    rng = random.Random(4)
+    base = [rng.gauss(0.0, 1.0) for _ in range(40)]
+    cands = [list(base), list(base), list(base)]
+    padj = romano_wolf_pvalues(cands, base, n_boot=2000, seed=0)
+    assert len(padj) == 3
+    assert all(p > 0.5 for p in padj)
+    assert all(p == pytest.approx(1.0) for p in padj)
+
+
+def test_romano_wolf_single_strong_isolated():
+    """One candidate beats the base by a fixed positive margin at every date
+    (constant differential -> zero dispersion -> its studentised statistic is
+    enormous and never approached by the recentred bootstrap), the other two
+    are identical to the base. The strong one must get a tiny adjusted p; the
+    two null ones stay large. FWER control does NOT wash out a genuinely
+    dominant strategy."""
+    rng = random.Random(5)
+    base = [rng.gauss(0.0, 1.0) for _ in range(40)]
+    strong = [b + 0.5 for b in base]
+    cands = [list(base), strong, list(base)]   # strong is index 1
+    padj = romano_wolf_pvalues(cands, base, n_boot=3000, seed=0)
+    assert padj[1] < 0.05
+    assert padj[0] > 0.5
+    assert padj[2] > 0.5
+
+
+def test_romano_wolf_monotone_along_tstat_order():
+    """Adjusted p-values are non-decreasing when candidates are taken in
+    descending order of their observed statistic -- the stepdown clamp
+    guarantees it regardless of the underlying data."""
+    rng = random.Random(6)
+    base = [rng.gauss(0.0, 1.0) for _ in range(50)]
+    # A spread of edges: strong, mild, none, and a slightly negative one.
+    cands = [
+        [b + 0.4 + 0.05 * rng.gauss(0, 1) for b in base],
+        [b + 0.1 + 0.05 * rng.gauss(0, 1) for b in base],
+        [b + 0.05 * rng.gauss(0, 1) for b in base],
+        [b - 0.2 + 0.05 * rng.gauss(0, 1) for b in base],
+    ]
+    padj = romano_wolf_pvalues(cands, base, n_boot=2000, seed=0)
+    order = sorted(range(len(cands)), key=lambda j: _rw_tstats(cands, base)[j],
+                   reverse=True)
+    ordered = [padj[j] for j in order]
+    assert all(a <= b + 1e-12 for a, b in zip(ordered, ordered[1:]))
+
+
+def test_romano_wolf_two_strong_both_flagged():
+    """Two candidates each dominate the base by a fixed margin; both should be
+    flagged (tiny adjusted p) even though they compete inside the same family,
+    and the lone null candidate stays large."""
+    rng = random.Random(7)
+    base = [rng.gauss(0.0, 1.0) for _ in range(40)]
+    cands = [[b + 0.5 for b in base], [b + 0.3 for b in base], list(base)]
+    padj = romano_wolf_pvalues(cands, base, n_boot=3000, seed=0)
+    assert padj[0] < 0.05
+    assert padj[1] < 0.05
+    assert padj[2] > 0.5
+
+
+def test_romano_wolf_is_deterministic_in_seed():
+    rng = random.Random(8)
+    base = [rng.gauss(0.0, 1.0) for _ in range(45)]
+    cands = [[b + 0.1 * rng.gauss(0, 1) for b in base] for _ in range(5)]
+    p1 = romano_wolf_pvalues(cands, base, n_boot=1500, seed=99)
+    p2 = romano_wolf_pvalues(cands, base, n_boot=1500, seed=99)
     assert p1 == p2
