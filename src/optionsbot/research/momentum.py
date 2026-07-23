@@ -74,6 +74,13 @@ class MomentumParams:
     lookback_long: int = DAYS_12M
     use_regime_filter: bool = True
     regime_sma: int = 200
+    # RSI overlay on stock selection: after momentum ranking, keep only names
+    # whose RSI is within [rsi_min, rsi_max]. Defaults span the full range, so
+    # RSI is off unless narrowed. rsi_max < 100 = avoid-overbought; rsi_min > 0 =
+    # trend confirmation. See docs/14 for whether it actually helps (mostly not).
+    rsi_period: int = 14
+    rsi_min: float = 0.0
+    rsi_max: float = 100.0
 
 
 def _score_one(s: Series, i: int, p: MomentumParams) -> tuple[float, float] | None:
@@ -126,6 +133,7 @@ def momentum_scores(series: dict[str, Series], day: date,
     that point-in-time index membership are scored."""
     raw_s: dict[str, float] = {}
     raw_l: dict[str, float] = {}
+    rsi_on = p.rsi_min > 0.0 or p.rsi_max < 100.0
     for sym, s in series.items():
         if members is not None and sym not in members:
             continue
@@ -135,6 +143,10 @@ def momentum_scores(series: dict[str, Series], day: date,
         sc = _score_one(s, i, p)
         if sc is None:
             continue
+        if rsi_on:
+            r = s.rsi(i, p.rsi_period)
+            if r is None or not (p.rsi_min <= r <= p.rsi_max):
+                continue                            # RSI overlay excludes this name
         raw_s[sym], raw_l[sym] = sc
     zs, zl = _z(raw_s), _z(raw_l)
     return {sym: (zs[sym] + zl[sym]) / 2.0 for sym in raw_s}

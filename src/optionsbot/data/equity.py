@@ -51,6 +51,30 @@ class Series:
             return None
         return self.closes[i] / self.closes[j] - 1.0
 
+    def rsi(self, i: int, period: int = 14) -> float | None:
+        """Wilder's RSI as of index i, or None if history is too short.
+
+        Seeded with the simple average of the first `period` gains/losses over a
+        trailing warm-up window, then Wilder-smoothed forward — the standard
+        construction. A pure uptrend returns 100, a pure downtrend 0."""
+        warm = 5 * period
+        lo = max(1, i - warm)
+        if i - lo < period:
+            return None
+        avg_g = avg_l = 0.0
+        seed_hi = lo + period
+        for k in range(lo, seed_hi):                # simple average of first `period`
+            d = self.closes[k] - self.closes[k - 1]
+            avg_g += max(d, 0.0); avg_l += max(-d, 0.0)
+        avg_g /= period; avg_l /= period
+        for k in range(seed_hi, i + 1):             # Wilder smoothing forward
+            d = self.closes[k] - self.closes[k - 1]
+            avg_g = (avg_g * (period - 1) + max(d, 0.0)) / period
+            avg_l = (avg_l * (period - 1) + max(-d, 0.0)) / period
+        if avg_l == 0:
+            return 100.0
+        return 100.0 - 100.0 / (1.0 + avg_g / avg_l)
+
     def daily_vol(self, i: int, span: int) -> float | None:
         """Sample stdev of the last `span` daily returns ending at index i."""
         if i - span < 0:
