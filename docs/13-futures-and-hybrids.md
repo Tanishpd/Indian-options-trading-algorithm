@@ -1,5 +1,7 @@
 # 13 — Single Stocks, Futures, and the Hedged Hybrid (July 2026)
 
+> **Disclaimer:** Educational/research only — **not investment advice**, and the author is **not SEBI-registered**. All figures below are **backtested and hypothetical** (some partial or biased, as noted); **past performance does not guarantee future results**. Named funds/securities are **illustrative, not recommendations**. See [DISCLAIMER.md](../DISCLAIMER.md).
+
 [docs/12](12-where-the-edge-actually-is.md) established that the variance risk
 premium is real, large, and entirely tail insurance — and that a defined-risk
 structure is a net *buyer* of the only part of the surface that pays.

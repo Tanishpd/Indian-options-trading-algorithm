@@ -1,5 +1,7 @@
 # 12 — Where the Edge Actually Is (July 2026)
 
+> **Disclaimer:** Educational/research only — **not investment advice**, and the author is **not SEBI-registered**. All figures below are **backtested and hypothetical** (some partial or biased, as noted); **past performance does not guarantee future results**. Named funds/securities are **illustrative, not recommendations**. See [DISCLAIMER.md](../DISCLAIMER.md).
+
 Two studies said the strategy loses ([docs/10](10-first-backtest-findings.md),
 [docs/11](11-intraday-backtest-findings.md)). Both explained it with a mechanism
 that is **wrong**. This document gives the right one and closes the question.

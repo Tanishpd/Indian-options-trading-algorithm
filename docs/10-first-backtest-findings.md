@@ -1,5 +1,7 @@
 # 10 — First Backtest Findings (July 2026)
 
+> **Disclaimer:** Educational/research only — **not investment advice**, and the author is **not SEBI-registered**. All figures below are **backtested and hypothetical** (some partial or biased, as noted); **past performance does not guarantee future results**. Named funds/securities are **illustrative, not recommendations**. See [DISCLAIMER.md](../DISCLAIMER.md).
+
 The first evidence in this project produced from real market data rather than
 research, marketing, or a placeholder. **It is a negative result, and it is the
 most valuable thing built so far.**

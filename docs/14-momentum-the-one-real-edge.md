@@ -1,5 +1,7 @@
 # 14 — Momentum: The One Externally-Corroborated Edge (July 2026)
 
+> **Disclaimer:** Educational/research only — **not investment advice**, and the author is **not SEBI-registered**. All figures below are **backtested and hypothetical** (some partial or biased, as noted); **past performance does not guarantee future results**. Named funds/securities are **illustrative, not recommendations**. See [DISCLAIMER.md](../DISCLAIMER.md).
+
 Every option-based approach in this project failed for the same structural
 reason (docs/10–13): the variance risk premium is real but lives in the tail,
 and a ₹1–5 lakh account cannot reach it. This document records the one direction
