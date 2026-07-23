@@ -107,36 +107,70 @@ touch ~/options/secrets/broker.env && chmod 600 ~/options/secrets/broker.env
 
 Once the broker is chosen (PLAN Phase 0): register the Elastic IP in their API portal, complete OAuth app setup, then run the gate-1 verification from [SETUP.md](../SETUP.md) §7 — authenticate, refresh a token across a session boundary, pull quotes, raise a test alert — **from this box**.
 
-## 9. Running the bot as a service (Phase 4 template — the bot doesn't exist yet)
+## 9. Running the bot as a service (deployed — matches the live box)
 
-When `optionsbot.bot` exists, install this unit so the bot survives reboots and crashes:
+The deployed entrypoint is **`optionsbot.paper`**, not `optionsbot.bot` (which does
+not exist). Credentials come from **AWS Secrets Manager** via `--aws-secret`, not an
+`EnvironmentFile` — the box holds no secrets on disk. Two units are installed: a
+service, and a timer that starts a fresh session each trading weekday.
 
 ```ini
-# /etc/systemd/system/optionsbot.service
+# /etc/systemd/system/optionsbot-paper.service
 [Unit]
-Description=Options trading bot
+Description=Options paper trading session
 After=network-online.target
 Wants=network-online.target
+StartLimitIntervalSec=600
+StartLimitBurst=3
 
 [Service]
+Type=simple
 User=ubuntu
 WorkingDirectory=/home/ubuntu/options
-EnvironmentFile=/home/ubuntu/options/secrets/broker.env
-ExecStart=/home/ubuntu/options/.venv/bin/python -m optionsbot.bot --config config/default.toml
+Environment=PYTHONPATH=src
+Environment=PYTHONUNBUFFERED=1
+# --evaluate NAME (repeatable) shadow-evaluates a strategy alongside the live
+# one, writing a forward record to data/forward. Shadows place no real orders.
+ExecStart=/home/ubuntu/options/.venv/bin/python -m optionsbot.paper \
+    --aws-secret tradingbot/angel \
+    --evaluate tail-condor --evaluate reference-condor
 Restart=on-failure
-RestartSec=10
+RestartSec=60
 
 [Install]
 WantedBy=multi-user.target
 ```
 
-```bash
-sudo systemctl daemon-reload
-sudo systemctl enable --now optionsbot
-journalctl -u optionsbot -f          # live logs
+```ini
+# /etc/systemd/system/optionsbot-paper.timer
+[Unit]
+Description=Start paper session on trading weekdays
+
+[Timer]
+OnCalendar=Mon..Fri 09:10
+
+[Install]
+WantedBy=timers.target
 ```
 
-Two rules from docs/04 that the service design must respect: a restart must **reconcile positions against the broker before placing any order**, and repeated crash-restarts must page you (the `Restart=on-failure` loop is not a substitute for the alert channel).
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now optionsbot-paper.timer
+journalctl -u optionsbot-paper -f          # live logs
+python -m optionsbot.research.forward_report data/forward   # read the shadow records
+```
+
+**Changing the service config** (e.g. adding a `--evaluate` shadow): edit the unit,
+`daemon-reload`, and let the change take effect at the **next** session start rather
+than restarting mid-session. A session holding an open position is exactly what the
+"never restart a live session" rule (§8, and the CI deploy job) protects — a restart
+reconciles the position from `data/live/paper_state.json`, but a fresh session start
+is cleaner and loses nothing meaningful.
+
+Two rules from docs/04 that the service design must respect: a restart must
+**reconcile positions against the broker before placing any order** (the paper loop
+does this from its state file), and repeated crash-restarts must page you — the
+`Restart=on-failure`/`StartLimitBurst` loop is not a substitute for the alert channel.
 
 ## 10. Cost reality at ₹1 lakh capital — read before leaving it running
 
