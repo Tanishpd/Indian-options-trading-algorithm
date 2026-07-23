@@ -15,3 +15,4 @@ docs/decisions/
 # local agent/tooling config — not part of the published project
 CLAUDE.md
 /data/forward/
+/data/equity/
