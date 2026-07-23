@@ -21,7 +21,7 @@ from __future__ import annotations
 import subprocess
 import sys
 from dataclasses import replace
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 from ..data.equity import Series, load_membership, read_dir, read_series
@@ -58,6 +58,23 @@ def align_matrix(monthlies: dict[str, list[tuple[date, float]]], names: list[str
     return names, [[per_name[n][d] for d in common] for n in names]
 
 
+def fetch_windows(start: date, end: date, years: int = 5) -> list[tuple[date, date]]:
+    """CONTIGUOUS (lo, hi) fetch windows covering [start, end] with no gaps.
+
+    The first version advanced `lo` by `years` from `hi` instead of from `hi+1
+    day`, which skipped an entire `years`-long block of history and left the
+    index cache with a multi-year hole — silently corrupting the regime filter
+    and residual momentum across exactly that span. This helper exists so that
+    bug is a one-line, unit-tested invariant: consecutive windows must abut."""
+    out: list[tuple[date, date]] = []
+    lo = start
+    while lo <= end:
+        hi = min(date(lo.year + years, lo.month, lo.day), end)
+        out.append((lo, hi))
+        lo = hi + timedelta(days=1)
+    return out
+
+
 # -- data loading (box only) -----------------------------------------------
 
 def _paper_session_running() -> bool:
@@ -78,16 +95,13 @@ def load_index() -> Series:
     creds = load_credentials(None, aws_secret="tradingbot/angel", aws_region="ap-south-1")
     client = _connect(creds)
     seen: dict[str, float] = {}
-    lo = date(2016, 1, 1)
-    while lo <= date.today():
-        hi = min(date(lo.year + 5, lo.month, lo.day), date.today())
+    for lo, hi in fetch_windows(date(2016, 1, 1), date.today()):
         time.sleep(0.6)
         p = client.getCandleData({"exchange": "NSE", "symboltoken": NIFTY50_TOKEN,
                                   "interval": "ONE_DAY", "fromdate": f"{lo} 09:15",
                                   "todate": f"{hi} 15:30"})
         for row in (p or {}).get("data") or []:
             seen[str(row[0])[:10]] = float(row[4])
-        lo = date(hi.year + 5, hi.month, hi.day)
     if not seen:
         raise SystemExit("ABORT: NIFTY-50 fetch returned nothing.")
     ordered = sorted(seen)
@@ -103,11 +117,23 @@ def _log(lines: list[str], msg: str) -> None:
     print(msg, flush=True)
 
 
+def index_covers_window(index: Series, lo: date, hi: date, min_days: int = 100) -> bool:
+    """The index must actually have bars across [lo, hi]. A cache with a gap here
+    silently freezes the regime filter at a stale value and corrupts the whole
+    CV — so refuse to run rather than trust a holey index."""
+    return sum(1 for d in index.dates if lo <= d <= hi) >= min_days
+
+
 def main() -> None:
     lines: list[str] = []
     series = read_dir(MOM_DATA)
     membership = load_membership(PIT_DIR)
     index = load_index()
+    if not index_covers_window(index, CV_START, HOLDOUT_START):
+        raise SystemExit(
+            f"ABORT: NIFTY-50 index has too few bars in the CV window "
+            f"{CV_START}..{HOLDOUT_START} (holey cache). Delete {INDEX_CACHE} and "
+            f"re-run to re-fetch a contiguous series.")
     costs = EquityCostConfig()
     _log(lines, f"{len(series)} stocks, real NIFTY-50, PIT membership from "
                 f"{membership[0][0] if membership else '?'}. Net of ~30bps costs "
