@@ -97,13 +97,38 @@ def _z(values: dict[str, float]) -> dict[str, float]:
     return {k: (v - mu) / sd for k, v in values.items()}
 
 
+def members_asof(schedule: list[tuple[date, frozenset[str]]] | None,
+                 day: date) -> frozenset[str] | None:
+    """The index membership in force on `day`: the most recent snapshot at or
+    before it. None means "no restriction" (use the whole supplied universe).
+
+    This is the fix for survivorship bias. Without it, a backtest scores every
+    symbol that exists TODAY across all history, silently excluding the stocks
+    that fell out of the index — the failures — and overstating the result. With
+    a point-in-time schedule, each rebalance sees only the index as it actually
+    stood then (docs/14)."""
+    if not schedule:
+        return None
+    out: frozenset[str] | None = None
+    for eff, members in schedule:               # schedule is ascending by date
+        if eff <= day:
+            out = members
+        else:
+            break
+    return out
+
+
 def momentum_scores(series: dict[str, Series], day: date,
-                    p: MomentumParams) -> dict[str, float]:
+                    p: MomentumParams,
+                    members: frozenset[str] | None = None) -> dict[str, float]:
     """Composite momentum score per eligible symbol, as of `day` (uses only bars
-    on or before `day` — no look-ahead)."""
+    on or before `day` — no look-ahead). If `members` is given, only symbols in
+    that point-in-time index membership are scored."""
     raw_s: dict[str, float] = {}
     raw_l: dict[str, float] = {}
     for sym, s in series.items():
+        if members is not None and sym not in members:
+            continue
         i = s.index_on_or_before(day)
         if i is None:
             continue
@@ -180,8 +205,16 @@ class MomentumResult:
 
 def backtest(series: dict[str, Series], index: Series | None,
              params: MomentumParams, costs: EquityCostConfig,
-             start_capital: float = 500_000.0) -> MomentumResult:
-    """Monthly-rebalanced top-N momentum, marked daily, costs on every trade."""
+             start_capital: float = 500_000.0,
+             membership: list[tuple[date, frozenset[str]]] | None = None
+             ) -> MomentumResult:
+    """Monthly-rebalanced top-N momentum, marked daily, costs on every trade.
+
+    `membership`, if given, is a point-in-time index schedule (ascending
+    (effective_date, member-set) snapshots). Each rebalance then picks from the
+    index as it stood on that date, removing survivorship bias. Without it, the
+    whole supplied `series` is the eligible universe on every date — an
+    optimistic ceiling (docs/14)."""
     days = trading_days(series)
     if not days:
         return MomentumResult([], start_capital, 0)
@@ -211,7 +244,8 @@ def backtest(series: dict[str, Series], index: Series | None,
                 target: dict[str, float] = {}          # regime off: go to cash
                 res.in_cash_rebalances += 1
             else:
-                scores = momentum_scores(series, day, params)
+                members = members_asof(membership, day)
+                scores = momentum_scores(series, day, params, members)
                 winners = sorted(scores, key=scores.get, reverse=True)[: params.top_n]
                 winners = [w for w in winners if close_on(w, day)]
                 per = equity / len(winners) if winners else 0.0

@@ -99,6 +99,32 @@ def trading_days(series: dict[str, Series]) -> list[date]:
     return sorted(days)
 
 
+def load_membership(root: Path) -> list[tuple[date, frozenset[str]]]:
+    """Point-in-time index membership from dated snapshot files.
+
+    Each file is named `YYYY-MM-DD.txt` (the effective date of a reconstitution)
+    and lists that snapshot's member symbols, one per line (`#` comments and
+    blanks ignored). The index reconstitutes semi-annually, so ~2 files per year
+    is enough. Returned ascending by date — the shape `momentum.backtest`'s
+    `membership` argument expects. This is what converts the momentum backtest
+    from a survivorship-biased ceiling into an honest verdict (docs/14)."""
+    root = Path(root)
+    out: list[tuple[date, frozenset[str]]] = []
+    for path in sorted(root.glob("*.txt")):
+        try:
+            eff = date.fromisoformat(path.stem)
+        except ValueError:
+            continue                            # not a dated snapshot file
+        members = frozenset(
+            ln.strip().upper() for ln in path.read_text().splitlines()
+            if ln.strip() and not ln.startswith("#")
+        )
+        if members:
+            out.append((eff, members))
+    out.sort()
+    return out
+
+
 def month_end_days(days: list[date]) -> list[date]:
     """The last trading day in each calendar month — the rebalance dates."""
     out: list[date] = []
