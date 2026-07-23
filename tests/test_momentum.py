@@ -196,3 +196,29 @@ def test_load_membership_reads_dated_snapshots(tmp_path):
     assert [d for d, _ in sched] == [date(2020, 1, 1), date(2020, 7, 1)]
     assert sched[0][1] == frozenset({"A", "B", "C"})
     assert sched[1][1] == frozenset({"A", "C", "D"})
+
+
+# -- RSI overlay ----------------------------------------------------------
+
+def test_rsi_bounds_pure_trends():
+    up = series("U", [100, 101, 102, 103, 104, 105, 106, 107, 108, 109,
+                      110, 111, 112, 113, 114, 115, 116])            # pure uptrend
+    down = series("D", list(range(120, 103, -1)))                   # pure downtrend
+    assert up.rsi(16, 14) == pytest.approx(100.0)                   # no losses -> 100
+    assert down.rsi(16, 14) == pytest.approx(0.0)                   # no gains -> 0
+    assert up.rsi(5, 14) is None                                    # too short
+
+
+def test_rsi_overbought_filter_excludes_hot_names():
+    """Two stocks with equal-ish momentum; one is a pure (overbought) uptrend,
+    the other has pullbacks. rsi_max drops the overbought one."""
+    hot = series("HOT", [100 + i for i in range(20)])              # RSI ~100
+    cool = series("COOL", [100, 104, 101, 106, 102, 108, 103, 110, 104, 112,
+                           105, 114, 106, 116, 107, 118, 108, 120, 109, 122])
+    day = days(20)[-1]
+    p_all = MomentumParams(top_n=2, lookback_short=3, lookback_long=5,
+                           use_regime_filter=False)
+    p_filt = MomentumParams(top_n=2, lookback_short=3, lookback_long=5,
+                            use_regime_filter=False, rsi_period=14, rsi_max=80.0)
+    assert "HOT" in momentum_scores({"HOT": hot, "COOL": cool}, day, p_all)
+    assert "HOT" not in momentum_scores({"HOT": hot, "COOL": cool}, day, p_filt)

@@ -98,6 +98,45 @@ Caveats that keep this short of a final verdict, none of them small:
 - **21% is still a real drawdown.** Better than 28%, but "capital preservation
   matters" and a one-fifth temporary loss is not nothing.
 
+
+### RSI overlay — tested, and it does not help
+
+A natural question (does adding an RSI filter to momentum improve it?) was tested
+directly, with the same discipline: a **pre-specified** variant set, judged on the
+**out-of-sample** 2022-09+ window, not a threshold sweep with the best kept.
+
+All on the best base config (PIT membership, real NIFTY 50 regime filter, ₹5L,
+gross of STCG):
+
+| Overlay | Full CAGR | Full maxDD | Sharpe | Holdout CAGR |
+|---|---:|---:|---:|---:|
+| **none (base momentum)** | **23.6%** | 21.3% | **1.51** | 25.1% |
+| RSI-14 avoid > 90 | 23.8% | 21.3% | 1.52 | 25.1% |
+| RSI-14 avoid > 80 | 22.8% | 21.5% | 1.46 | 23.6% |
+| RSI-14 avoid > 70 | 20.8% | 19.5% | 1.38 | 23.9% |
+| RSI-14 band 55–80 | 16.2% | 29.3% | 1.12 | 22.3% |
+| RSI-2 avoid > 95 | 21.8% | 18.5% | 1.43 | 24.8% |
+
+**No overlay beats base momentum on a risk-adjusted basis** — base has the highest
+Sharpe (1.51), and every RSI variant is below it, both full-period and
+out-of-sample. There is a clean reason, not just a data quirk: **momentum works
+because winners keep winning**, and the strongest stocks are by construction
+"overbought" on RSI. RSI's job is to flag exactly those and tell you to avoid them,
+so the two signals fight — RSI sells the stocks momentum wants to hold. The
+literature treats them as opposing, and this data confirms it.
+
+Two traps the discipline caught:
+- **RSI-14 avoid > 90 "wins" (23.8% vs 23.6%) — that is noise.** RSI above 90 barely
+  excludes anything, so it is ~identical to base; the 0.2 point gap is meaningless.
+  It is precisely the false find a "keep the best backtest" search would have kept.
+- **Tighter filters (> 70, RSI-2 > 95) do cut drawdown** (21.3% → ~19/18.5%) — but
+  they cut return more, so Sharpe falls. Not a free lunch, and the regime filter is
+  already the better drawdown tool.
+
+The RSI overlay is in the code (`MomentumParams.rsi_min/rsi_max`, opt-in, off by
+default) so the result is reproducible, but the finding is: **base momentum with
+the regime filter is the best configuration; RSI does not improve it.**
+
 ## What was built
 
 A cost-honest, tested momentum backtest, in the same style as the rest of the
