@@ -1,5 +1,7 @@
 # 11 — Intraday Backtest Findings (July 2026)
 
+> **Disclaimer:** Educational/research only — **not investment advice**, and the author is **not SEBI-registered**. All figures below are **backtested and hypothetical** (some partial or biased, as noted); **past performance does not guarantee future results**. Named funds/securities are **illustrative, not recommendations**. See [DISCLAIMER.md](../DISCLAIMER.md).
+
 The second real backtest, and the first one that tests **the strategy the live
 bot actually runs** — entry inside a time window, exit on a profit target or a
 stop, forced square-off on expiry day. [docs/10](10-first-backtest-findings.md)

@@ -6,7 +6,18 @@ An automated, defined-risk options trading system for Indian index derivatives (
 
 **Status:** Live paper trading using Angel One SmartAPI market data with simulated order execution and a complete transaction-cost model. No real orders are placed.
 
-**Disclaimer:** This repository exists for research and educational purposes and does not constitute investment advice. No strategy in this repository has demonstrated long-term profitability; the validation criteria that would establish such evidence are defined in the project plan and have deliberately not yet been met.
+> ## ⚠️ Disclaimer — read [DISCLAIMER.md](DISCLAIMER.md) before using anything here
+>
+> This repository is for **educational and research purposes only** and is **not
+> investment advice**. The author is **not a SEBI-registered Investment Adviser or
+> Research Analyst.** All performance figures are **backtested and hypothetical** —
+> they do not reflect actual trading, several are explicitly documented as partial
+> or biased, and **past (including backtested) performance does not guarantee
+> future results.** Any specific fund or security named (e.g. the HDFC NIFTY 200
+> Momentum 30 Index Fund) is **illustrative of a method, not a recommendation.**
+> Trading and investing carry a **substantial risk of loss.** The software is
+> provided **"as is", without warranty; use at your own risk.** Consult a
+> SEBI-registered adviser before making any decision. Full terms: **[DISCLAIMER.md](DISCLAIMER.md).**
 
 ## Documentation
 
