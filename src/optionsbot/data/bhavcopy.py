@@ -284,3 +284,100 @@ def daterange(start: date, end: date) -> Iterator[date]:
         if d.weekday() < 5:                      # exchanges are shut at weekends
             yield d
         d += timedelta(days=1)
+
+
+# -- Cash-segment (equity) EOD -------------------------------------------
+#
+# The momentum strategy (docs/14) needs daily stock closes, not option chains.
+# NSE publishes the cash segment in the SAME UDiFF format as F&O, at a parallel
+# URL, so the fetch/guard helpers above are reused verbatim. One row per stock
+# per day: FinInstrmTp 'STK', and SctySrs 'EQ' for the main equity series (BE,
+# BZ, SM etc. are trade-to-trade / SME boards, excluded).
+
+CM_URL = (
+    "https://nsearchives.nseindia.com/content/cm/"
+    "BhavCopy_NSE_CM_0_0_0_{ymd}_F_0000.csv.zip"
+)
+
+
+@dataclass(frozen=True, slots=True)
+class EquityEod:
+    """One stock on one day, from the cash-segment UDiFF file."""
+
+    day: date
+    symbol: str
+    series: str
+    open: float
+    high: float
+    low: float
+    close: float
+    last_price: float
+    volume: int
+
+    @property
+    def traded(self) -> bool:
+        """False when nothing traded: the close is a stale carried figure, the
+        same trap the F&O ingester guards (module docstring, point 3)."""
+        return self.volume > 0
+
+
+def _parse_equity(raw: dict) -> EquityEod | None:
+    if raw.get("FinInstrmTp") != "STK" or raw.get("SctySrs") != "EQ":
+        return None                              # options, indices, SME, T2T: skip
+    f = lambda k: float(raw.get(k) or 0)         # noqa: E731
+    return EquityEod(
+        day=date.fromisoformat(raw["TradDt"]),
+        symbol=raw["TckrSymb"].strip(),
+        series=raw["SctySrs"].strip(),
+        open=f("OpnPric"), high=f("HghPric"), low=f("LwPric"), close=f("ClsPric"),
+        last_price=f("LastPric"), volume=int(f("TtlTradgVol")),
+    )
+
+
+def fetch_equity_day(day: date, traded_only: bool = True) -> list[EquityEod]:
+    """Every equity (`SctySrs == "EQ"`) row on `day`. Raises NoDataForDate on a
+    holiday/weekend, which callers ranging over dates should catch and skip."""
+    url = CM_URL.format(ymd=day.strftime("%Y%m%d"))
+    rows = [r for raw in _rows_from_bytes(_fetch(url), url)
+            if (r := _parse_equity(raw)) is not None]
+    if not rows:
+        raise NoDataForDate(f"{url} -> no equity rows")
+    return [r for r in rows if r.traded] if traded_only else rows
+
+
+def build_equity_series(start: date, end: date, out_dir: Path,
+                        symbols: set[str] | None = None,
+                        log=lambda _m: None) -> dict[str, int]:
+    """Fetch the cash bhavcopy across a date range and write one `date,close`
+    CSV per symbol into `out_dir` — the exact shape `data.equity.read_dir` reads.
+
+    `symbols` restricts output to a universe (pass a POINT-IN-TIME Nifty 200 list
+    — a current list applied to history is survivorship bias, docs/14). Holidays
+    are skipped, not fatal. Returns {symbol: bars_written}.
+    """
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    accum: dict[str, list[tuple[date, float]]] = {}
+    days_ok = 0
+    for d in daterange(start, end):
+        try:
+            rows = fetch_equity_day(d)
+        except NoDataForDate:
+            continue                             # market holiday
+        days_ok += 1
+        for r in rows:
+            if symbols is not None and r.symbol not in symbols:
+                continue
+            accum.setdefault(r.symbol, []).append((r.day, r.close))
+        if days_ok % 50 == 0:
+            log(f"  fetched {days_ok} sessions, {len(accum)} symbols so far")
+
+    for sym, bars in accum.items():
+        bars.sort()
+        with open(out_dir / f"{sym}.csv", "w", newline="") as fh:
+            w = csv.writer(fh)
+            w.writerow(["date", "close"])
+            for d, c in bars:
+                w.writerow([d.isoformat(), c])
+    log(f"wrote {len(accum)} symbols x up to {days_ok} sessions to {out_dir}")
+    return {sym: len(bars) for sym, bars in accum.items()}

@@ -173,3 +173,55 @@ def test_volume_unit_set_holds_only_verified_indices():
     check_index() cannot even accept was never verified against real data."""
     from optionsbot.calendar import SUPPORTED_INDICES
     assert bc._VOLUME_IN_UNITS <= set(SUPPORTED_INDICES)
+
+
+# -- Cash-segment (equity) ingestion --------------------------------------
+
+def _cm_row(sym, series, close, vol, day="2025-06-02"):
+    """A UDiFF cash-segment row (only the fields the parser reads)."""
+    return {"TradDt": day, "FinInstrmTp": "STK", "SctySrs": series,
+            "TckrSymb": sym, "OpnPric": "100", "HghPric": "105", "LwPric": "99",
+            "ClsPric": str(close), "LastPric": str(close), "TtlTradgVol": str(vol)}
+
+
+def test_equity_parser_keeps_only_traded_eq_series():
+    from datetime import date
+    good = bc._parse_equity(_cm_row("RELIANCE", "EQ", 2900.5, 1_000_000))
+    assert good is not None
+    assert good.symbol == "RELIANCE" and good.close == 2900.5
+    assert good.day == date(2025, 6, 2) and good.traded
+    # SME / trade-to-trade series are not the momentum universe.
+    assert bc._parse_equity(_cm_row("SMALLCO", "SM", 50, 1000)) is None
+    # An index or option row (no STK type) is skipped.
+    assert bc._parse_equity({"FinInstrmTp": "IDX", "SctySrs": "",
+                             "TckrSymb": "NIFTY 50"}) is None
+
+
+def test_build_equity_series_writes_readable_per_symbol_csvs(tmp_path, monkeypatch):
+    """The range builder must produce exactly the date,close shape the momentum
+    loader reads, skip holidays, and honour the universe filter."""
+    from datetime import date
+    from optionsbot.data import bhavcopy, equity
+
+    canned = {
+        date(2025, 6, 2): [bc._parse_equity(_cm_row("A", "EQ", 100, 500, "2025-06-02")),
+                           bc._parse_equity(_cm_row("B", "EQ", 200, 500, "2025-06-02")),
+                           bc._parse_equity(_cm_row("Z", "EQ", 9, 500, "2025-06-02"))],
+        date(2025, 6, 3): [bc._parse_equity(_cm_row("A", "EQ", 110, 500, "2025-06-03")),
+                           bc._parse_equity(_cm_row("B", "EQ", 190, 500, "2025-06-03"))],
+    }
+
+    def fake_fetch(day, traded_only=True):
+        if day not in canned:
+            raise bc.NoDataForDate(f"holiday {day}")   # e.g. weekend / gap day
+        return canned[day]
+
+    monkeypatch.setattr(bhavcopy, "fetch_equity_day", fake_fetch)
+    written = bhavcopy.build_equity_series(
+        date(2025, 6, 1), date(2025, 6, 5), tmp_path, symbols={"A", "B"}, log=lambda _: None)
+
+    assert set(written) == {"A", "B"}          # Z filtered out by the universe
+    assert written["A"] == 2
+    series = equity.read_dir(tmp_path)          # round-trips through the real loader
+    assert series["A"].closes == (100.0, 110.0)
+    assert series["B"].closes == (200.0, 190.0)

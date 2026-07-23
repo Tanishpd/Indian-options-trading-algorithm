@@ -81,13 +81,19 @@ project (correct infrastructure first; real numbers when the data is in hand):
 **The backtest has not been run on real Nifty 200 data — none exists in this
 repo.** The verdict is only as honest as the universe fed to it:
 
-1. **Data.** Supply per-symbol daily closes for the Nifty 200, plus a benchmark
-   series for the regime filter. NSE's cash-segment EOD bhavcopy carries this;
-   `optionsbot.data.bhavcopy` would need extending to fetch the equity file.
-2. **Survivorship bias is the trap.** A **current** Nifty 200 list applied to
-   history silently drops every stock that fell out of the index — which
-   overstates the result, sometimes severely. A **point-in-time membership**
-   list is the honest input. Without it, treat the CAGR as an optimistic ceiling.
+1. **Data — the fetcher now exists.** `optionsbot.data.bhavcopy.fetch_equity_day`
+   pulls NSE's cash-segment UDiFF file (verified live: 2,386 EQ stocks on
+   2026-07-16), and `python -m optionsbot.data.fetch_equity <start> <end> <dir>
+   --universe <list>` writes the per-symbol `date,close` files the backtest
+   reads. What is still missing is a **benchmark index series** for the regime
+   filter (the CM file has stocks, not indices — source NIFTY 50 separately) and
+   the universe list below.
+2. **Survivorship bias is the remaining trap, and it is a data problem, not a
+   code one.** `fetch_equity` takes a `--universe` file; feed it a **point-in-time
+   Nifty 200 membership** list (the index as it stood on each date, not today).
+   A **current** list applied to history silently drops every stock that fell out
+   of the index, which overstates the result, sometimes severely. Without a
+   point-in-time list, any run is an optimistic ceiling and must be labelled so.
 3. **STCG tax is not modelled.** The backtest is gross of tax; short-term equity
    gains are taxed at the prevailing rate (15% historically). Apply that haircut
    to the CAGR for a net figure.
