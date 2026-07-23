@@ -13,7 +13,8 @@ import pytest
 from optionsbot.data.equity import Series
 from optionsbot.research.momentum import EquityCostConfig, MomentumParams, backtest
 from optionsbot.research.strategy_search import (
-    StrategyConfig, run_strategy, _voltarget_scale)
+    StrategyConfig, run_strategy, _voltarget_scale, _residual_pair,
+    _index_returns_by_date)
 
 D0 = date(2025, 1, 1)
 
@@ -128,6 +129,41 @@ def test_voltarget_scale_clips_to_floor_and_cap():
     # Binary config (default) never scales.
     base = StrategyConfig(name="b")
     assert _voltarget_scale(idx, days(80)[-1], base) == 1.0
+
+
+# -- residual momentum must measure idiosyncratic drift, not zero it --------
+
+def test_residual_pair_captures_idiosyncratic_drift():
+    """A stock that beats the index by a steady margin (positive alpha, same beta)
+    must get a clearly positive residual-momentum score; an index tracker (~zero
+    alpha) must score near zero. Regression guard for the OLS-alpha bug that
+    forced residual means to zero and turned the ranking into noise."""
+    n = 60
+    # market returns (varied), plus idiosyncratic noise on a different cycle so
+    # both stocks have residual variance (a zero-variance residual is undefined).
+    rm = [0.0] + [0.010 if k % 2 == 0 else -0.004 for k in range(1, n)]
+    noise = [0.0] + [(0.003, -0.001, -0.002)[k % 3] for k in range(1, n)]
+
+    def build(*, market_only: bool, drift: float = 0.0) -> tuple[float, ...]:
+        c = [100.0]
+        for k in range(1, n):
+            r = rm[k] if market_only else rm[k] + noise[k] + drift
+            c.append(c[-1] * (1 + r))
+        return tuple(c)
+
+    ds = days(n)
+    idx = Series("IDX", ds, build(market_only=True))
+    track = Series("TRACK", ds, build(market_only=False, drift=0.0))    # ~zero alpha
+    alpha = Series("ALPHA", ds, build(market_only=False, drift=0.004))  # +40bps/day drift
+    cfg = StrategyConfig(name="r", rank_mode="residual",
+                         lookback_short=20, lookback_long=40, regime_mode="none")
+    idx_ret = _index_returns_by_date(idx)
+    i = alpha.index_on_or_before(ds[-1])
+    a_pair = _residual_pair(alpha, i, cfg, idx_ret)
+    t_pair = _residual_pair(track, i, cfg, idx_ret)
+    assert a_pair is not None and t_pair is not None
+    assert a_pair[0] > 0.5 and a_pair[1] > 0.5    # drift shows up (was ~0 when buggy)
+    assert abs(t_pair[0]) < 0.5                    # tracker has no drift
 
 
 # -- every mode at least runs and stays solvent (integration smoke) --------

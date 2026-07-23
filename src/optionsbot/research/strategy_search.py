@@ -145,8 +145,14 @@ def _residual_pair(s: Series, i: int, cfg: StrategyConfig,
         ba = ind.ols_beta_alpha(ys, xs)
         if ba is None:
             return None
-        beta, alpha = ba
-        resid = [y - (alpha + beta * x) for y, x in zip(ys, xs)]
+        beta, _alpha = ba
+        # Keep the idiosyncratic drift (alpha) IN the residual — subtract only the
+        # market component beta*x. Subtracting the fitted alpha too would force the
+        # residual mean to zero (OLS guarantees sum of residuals = 0), collapsing
+        # the score to noise. residual = alpha + e_t, so mean(residual) = alpha is
+        # exactly the stock-specific trend residual momentum is meant to rank on
+        # (Blitz-Huij-Martens).
+        resid = [y - beta * x for y, x in zip(ys, xs)]
         if len(resid) < 2:
             return None
         sd = statistics.stdev(resid)
