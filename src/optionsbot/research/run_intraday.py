@@ -79,6 +79,10 @@ def main(argv: list[str] | None = None) -> int:
                     help="points given up per leg, each way (default models a real spread)")
     ap.add_argument("--targets", type=float, nargs="+", default=[0.25, 0.50, 0.75])
     ap.add_argument("--stops", type=float, nargs="+", default=[0.40, 0.60, 0.80])
+    ap.add_argument("--trail", type=float, nargs="+", default=[0.0],
+                    help="trailing profit-lock give-back fractions (0 = off). "
+                         "Set profit target to 1.0 to make the trail the sole "
+                         "profit mechanism (docs/11 addendum).")
     args = ap.parse_args(argv)
 
     files = cycles(args.root)
@@ -91,13 +95,17 @@ def main(argv: list[str] | None = None) -> int:
     costs, market = CostConfig(), MarketConfig()
     for tf in args.targets:
         for sf in args.stops:
-            params = IntradayParams(profit_target_frac=tf, stop_loss_frac=sf,
-                                    slippage_per_leg=args.slippage)
-            for label, risk in (("cap on ", RiskConfig()), ("cap off", NO_CAP)):
-                report(f"target {tf:.2f} stop {sf:.2f} {label}",
-                       run(files, args.index, params, costs, risk, market),
-                       args.capital)
-            print()
+            for trl in args.trail:
+                params = IntradayParams(profit_target_frac=tf, stop_loss_frac=sf,
+                                        trail_stop_frac=trl,
+                                        slippage_per_leg=args.slippage)
+                tag = f"target {tf:.2f} stop {sf:.2f}" + (
+                    f" trail {trl:.2f}" if trl > 0 else "")
+                for label, risk in (("cap on ", RiskConfig()), ("cap off", NO_CAP)):
+                    report(f"{tag} {label}",
+                           run(files, args.index, params, costs, risk, market),
+                           args.capital)
+                print()
     return 0
 
 

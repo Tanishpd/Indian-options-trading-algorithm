@@ -281,6 +281,50 @@ Known limitations, documented rather than smoothed over:
    of a filter nobody declared. Report cap-on and cap-off figures side by side,
    and model slippage explicitly, or the number is not evidence.
 
+## Addendum — a trailing stop makes it worse (2026-07-24)
+
+After the momentum search found trailing stops do not help equities
+([docs/16](16-exhaustive-sweep.md)), the owner asked whether the same holds on
+the options track. It does — and here it is not merely neutral, it is **actively
+destructive.**
+
+A trailing profit-lock was added to the study (`trail_stop_frac`): once the
+structure is in profit, exit if the unrealised profit gives back that fraction of
+its peak. It only ever tightens a winner; the hard stop still guards losses. It
+was tested alongside the 50%-of-credit target and as the *sole* profit mechanism
+(target off), at give-back thresholds 0.3–0.7, on the same 72 cycles with honest
+slippage:
+
+| Config (cap on, 57 cycles) | Net | Win % | Exit mix |
+|---|---:|---:|---|
+| **baseline (no trail)** | **−₹12,745** | 47.4 | stop 30 / target 27 |
+| target 0.5 + trail 0.5 | −₹21,221 | **0.0** | stop 7 / trail 50 |
+| trail-only 0.3 | −₹21,102 | **0.0** | stop 7 / trail 50 |
+| trail-only 0.5 | −₹21,221 | **0.0** | stop 7 / trail 50 |
+| trail-only 0.7 | −₹21,320 | **0.0** | stop 7 / trail 50 |
+
+(cap-off is the same story: −₹21,066 → ~−₹25,600.)
+
+Every trailing variant posts a **0% win rate**, a net ~₹8,500 **worse** than
+baseline, and a t-statistic near **−9** (it reliably *loses*). The mechanism is
+the negative-gamma whipsaw in pure form: the trail fires on ~88% of cycles
+(50 of 57), booking a small gross profit that is **negative after the four-leg
+exit slippage and STT**, on a structure whose whole edge is decaying to expiry.
+The give-back threshold barely matters — 0.3, 0.5 and 0.7 all land near −₹21,200,
+because the condor is cheap enough that *any* retracement trips it early — and
+with the trail on, the fixed target never fires (the trail always beats it).
+
+This is the same lesson as the equity sweep, stronger: on short premium a
+trailing stop is not neutral, it is destructive. It **confirms** the closed
+options verdict ([docs/12](12-where-the-edge-actually-is.md)) — an exit rule
+cannot rescue a structure that is a net buyer of the only premium that pays.
+Reproduce with:
+
+```
+python -m optionsbot.research.run_intraday data/intraday/NIFTY \
+    --targets 0.50 1.0 --stops 0.60 --trail 0.0 0.3 0.5 0.7
+```
+
 ## Reproducing
 
 ```

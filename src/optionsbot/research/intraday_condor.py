@@ -45,6 +45,12 @@ class IntradayParams:
     # Share of MAX LOSS, not a multiple of credit: see reference_condor for why
     # a credit multiple is frequently unreachable and silently disables the stop.
     stop_loss_frac: float = 0.60
+    # Trailing profit-lock (0 = off). Once the structure has been in profit, exit
+    # if the unrealised profit gives back this fraction of its PEAK. It only ever
+    # tightens a winner; the hard stop_loss still guards losses. Tested in the
+    # docs/11 addendum — the owner asked whether the momentum trailing-stop result
+    # carries over to options. It does (and worse): see docs/11.
+    trail_stop_frac: float = 0.0
     squareoff: time = time(15, 0)      # expiry-day forced exit
     min_credit_frac: float = 0.0
     # Points given up per leg, each way. Defaults to a realistic 5 ticks rather
@@ -61,7 +67,7 @@ class IntradayTrade:
     expiry: date
     entered_at: datetime
     exited_at: datetime
-    exit_reason: str                   # target | stop | squareoff
+    exit_reason: str                   # target | stop | trail | squareoff
     short_call: float
     short_put: float
     credit: float                      # per share, realised at entry
@@ -199,6 +205,7 @@ def run_expiry(
         return None, "no_data"
 
     entry: tuple[datetime, list[Bar], list[tuple[float, Right, Side]], float] | None = None
+    best_value = float("inf")          # lowest cost-to-close since entry (peak profit)
     for ts in sorted(minutes):
         dte = (expiry - ts.date()).days
         if entry is None:
@@ -254,10 +261,16 @@ def run_expiry(
                 value = quoted_value + 4 * params.slippage_per_leg
 
         # Stop checked first: when both conditions hold in one minute, booking
-        # the loss is the conservative reading.
+        # the loss is the conservative reading. `value` includes exit slippage,
+        # so the trailing lock is measured on the same honest mark.
+        best_value = min(best_value, value)
+        peak_profit = credit - best_value
         stop_at = credit + params.stop_loss_frac * (params.wing_points - credit)
         if value >= stop_at:
             reason = "stop"
+        elif (params.trail_stop_frac > 0.0 and peak_profit > 1e-9
+              and (credit - value) <= (1.0 - params.trail_stop_frac) * peak_profit):
+            reason = "trail"                          # gave back too much of the peak
         elif value <= credit * (1 - params.profit_target_frac):
             reason = "target"
         elif must_close:
