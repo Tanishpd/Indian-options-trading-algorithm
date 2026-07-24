@@ -9,9 +9,12 @@ ways so the null cannot be waved away:
    SVM) evaluated by true WALK-FORWARD: at each step the scaler AND the model are refit
    on the expanding training slice only, then used to predict the next block. No model
    ever sees its own test rows, and nothing is standardized using future data.
-2. **A permutation null on the winner.** The labels are shuffled and the entire
-   walk-forward is re-run hundreds of times, giving the distribution of "best gated P&L
-   achievable from noise". A model with skill must beat that distribution.
+2. **A permutation null, resampled WITHIN the test region.** A model that trades k of
+   the N out-of-sample days is compared against drawing k days at random from those same
+   N days. The first version of this study shuffled labels across the WHOLE series and
+   re-ran the walk-forward, which quietly dragged the profitable early regime into the
+   test-window null, inflating it and therefore inflating every p-value (the winner's
+   went 0.018 -> 0.875). Resample only from the pool the model actually chose from.
 3. **A POSITIVE CONTROL.** A null is only worth believing if the harness could have
    found an edge had one existed, so the same machinery is re-run against a synthetic
    target with a deliberately injected signal. If it detects that and not the real
@@ -40,7 +43,7 @@ from .intraday_only import intraday_params, plan_days, run
 from .run_intraday import cycles
 
 SEED = 7
-NPERM = 600
+NDRAW = 20000          # random k-of-test-region draws forming the null
 INIT_FRAC = 0.4        # first 40% of days seed the expanding window
 STEP = 5               # predict 5 days, then refit
 
@@ -174,13 +177,12 @@ def positive_control(X, rng):
     preds, tested = walk_forward(X, cls, synth, fac, kind)
     base = float(synth[tested].sum())
     gated = float(synth[tested & preds].sum())
-    null = []
-    for _ in range(200):
-        perm = rng.permutation(len(X))
-        p, t = walk_forward(X, cls[perm], synth[perm], fac, kind)
-        null.append(synth[perm][t & p].sum())
-    p_perm = float(np.mean(np.array(null) >= gated))
-    return base, gated, p_perm
+    pool = synth[tested]
+    k = int((tested & preds).sum())
+    if not (0 < k < len(pool)):
+        return base, gated, float("nan")
+    draws = np.array([rng.choice(pool, k, replace=False).sum() for _ in range(NDRAW)])
+    return base, gated, float(np.mean(draws >= gated))
 
 
 def main(argv=None) -> int:
@@ -204,8 +206,17 @@ def main(argv=None) -> int:
     configs = sweep()
     print(f"{n} usable days; walk-forward OOS over {days} days (refit every {STEP}).")
     print(f"ALWAYS-TRADE OOS net = {base:,.0f} (1 lot). {len(configs)} configs tried.\n")
-    print(f"  {'model':<16} {'gated net':>11} {'trades':>9} {'daily SR':>9} {'vs base':>9}")
-    print("  " + "-" * 60)
+    pool = ynet[tested0].astype(float)
+
+    def null_p(gated: float, k: int) -> float:
+        """Draw k days at random FROM THE TEST REGION — the pool the model chose from."""
+        if not (0 < k < len(pool)):
+            return float("nan")
+        draws = np.array([rng.choice(pool, k, replace=False).sum() for _ in range(NDRAW)])
+        return float(np.mean(draws >= gated))
+
+    print(f"  {'model':<16} {'gated net':>11} {'trades':>9} {'daily SR':>9} {'vs base':>9} {'p':>8}")
+    print("  " + "-" * 70)
 
     results = []
     for name, (kind, fac) in configs.items():
@@ -214,22 +225,20 @@ def main(argv=None) -> int:
         g = float(ynet[sel].sum())
         r = ynet[sel].astype(float)
         sr = 0.0 if len(r) < 2 or r.std() == 0 else float(r.mean() / r.std())
-        results.append((name, g, int(sel.sum()), sr, kind, fac))
+        p = null_p(g, int(sel.sum()))
+        results.append((name, g, int(sel.sum()), sr, kind, fac, p))
         print(f"  {name:<16} {g:>11,.0f} {str(int(sel.sum()))+'/'+str(days):>9} "
-              f"{sr:>9.3f} {g - base:>+9,.0f}")
+              f"{sr:>9.3f} {g - base:>+9,.0f} {p:>8.4f}")
 
     results.sort(key=lambda t: -t[1])
     best = results[0]
-    print(f"\nBest by OOS net: {best[0]} ({best[1]:,.0f}, vs base {best[1]-base:+,.0f}).")
-
-    null = np.empty(NPERM)
-    for k in range(NPERM):
-        perm = rng.permutation(n)
-        p, t = walk_forward(X, ycls[perm], ynet[perm], best[5], best[4])
-        null[k] = ynet[perm][t & p].sum()
-    p_perm = float(np.mean(null >= best[1]))
-    print(f"Permutation null ({NPERM}x shuffled labels): real net beats "
-          f"{100*(1-p_perm):.1f}% of noise runs (p={p_perm:.3f}).")
+    p_perm = best[6]
+    print(f"\nBest by OOS net: {best[0]} ({best[1]:,.0f}, vs base {best[1]-base:+,.0f}), "
+          f"p={p_perm:.4f} against random selection of the same {best[2]} days.")
+    skipped = ynet[tested0 & ~walk_forward(X, ycls, ynet, best[5], best[4])[0]]
+    if len(skipped) <= 5:
+        print(f"  NB: it skipped only {len(skipped)} day(s) "
+              f"({', '.join(f'{v:,.0f}' for v in skipped)}) — that is one decision, not a strategy.")
 
     sel = walk_forward(X, ycls, ynet, best[5], best[4])
     r = ynet[sel[1] & sel[0]].astype(float)
