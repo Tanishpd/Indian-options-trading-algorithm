@@ -116,6 +116,15 @@ redesigned in response to these results.
 
 **Gate 2** (= gate 2 in docs/06): chosen config meets target net of costs AND stays inside the drawdown cap on held-out data. *If nothing passes honestly, the finding is "target infeasible as specified" — report it, don't torture parameters.*
 
+**Research phase closed — see [docs/18](docs/18-the-verdict.md) for the full synthesis
+and the one decision that remains.** Bottom line: the options-income mandate (20–25%
+at 5–10% DD) is unachievable in the verified evidence; the one real, OOS-surviving edge
+is NIFTY 200 momentum (~15%/~30% DD, [docs/14](docs/14-momentum-the-one-real-edge.md)),
+which is equity, not options. The forward fork is the owner's: pursue that edge and
+accept the ~30% drawdown, or preserve capital at ~6–7% with the cap intact. The ₹6L /
+constraints-lifted study ([docs/17](docs/17-the-6L-50pct-question.md)) confirmed even
+naked/hedged/intraday-only options offer no survivable edge.
+
 **Gate 2 verdict: NOT PASSED.** Invoking that clause as written. The binding
 problem is not the cost floor and not a parameter: it is that the premium is
 concentrated in the tail while the ₹2,000 cap — against a ₹3,250 minimum risk
