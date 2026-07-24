@@ -8,6 +8,10 @@ dependencies = []
 [project.optional-dependencies]
 dev = ["pytest>=8"]
 paper = ["smartapi-python>=1.4", "pyotp>=2.9", "logzero", "websocket-client"]
+# Offline research only (docs/19 ML study). Deliberately NOT a runtime dependency:
+# the bot and the EC2 box run on the standard library, and nothing under this extra
+# is ever imported by the paper loop or the live strategies.
+research = ["numpy>=2", "scikit-learn>=1.5", "scipy>=1.11"]
 
 [build-system]
 requires = ["setuptools>=68"]
