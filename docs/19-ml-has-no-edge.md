@@ -9,7 +9,7 @@ The headline is not "ML is bad." It is that **model choice was never the binding
 Three things, because a null needs more defending than a positive:
 
 1. **A wide sweep under true walk-forward.** 14 configs spanning the capacity range — regularized logistic at four strengths, ridge at three, gradient boosting at two depths, random forest at two, kNN, and both SVM kernels. At every step the **scaler and the model are refit on the expanding training slice only**, then used to predict the next 5-day block. No model ever sees its own test rows; nothing is standardized using future data. 13 features, all knowable before the trade: trailing realized vol (5/10/20d), 5d and 10d trend, the overnight gap and its magnitude, the morning's credit (an implied-vol proxy), a credit/vol "VRP" ratio, DTE, day-of-week, and the previous two days' results.
-2. **A permutation null on the winner** — shuffle the labels, re-run the *entire* walk-forward, 600 times, to get the distribution of "best gated P&L obtainable from noise."
+2. **A permutation null, resampled *within the test region*** — a model that trades k of the N out-of-sample days is compared against drawing k of those same N days at random (20,000 draws). (The first attempt shuffled labels globally and was biased; see the correction below.)
 3. **A positive control** — the same machinery against a synthetic target with a deliberately injected edge. *A null from a blind harness means nothing*, so this has to pass before the null counts.
 
 Each model is scored as a gate: trade the strangle on days it predicts a profit, sit out otherwise. The benchmark is simply **trading every day**.
@@ -37,11 +37,19 @@ Each model is scored as a gate: trade the strangle on days it predicts a profit,
 
 Three things kill it:
 
-- **Every single model still loses money.** The "best" ones only lose *less* than always-trading, by sitting out days in an already-losing stretch. None turns the period positive.
-- **The winner is indistinguishable from noise.** `logistic C=.03` beats only **12.5% of shuffled-label runs (p = 0.875)** — it is *worse* than 87% of pure noise. Its Deflated Sharpe, accounting for K=14 trials, is **0.316** (needs > 0.95), on an observed daily Sharpe of **−0.005**. Note also *what* the winner is: the **most heavily regularized linear model**, which traded 193 of 194 days — i.e. it learned "always trade" and the small difference is luck.
-- **Capacity actively hurts.** Gradient boosting is the **worst model tested** (−₹20,526, −₹13,890 vs base), and the tree/kernel models cluster at the bottom. That is the textbook signature of overfitting ~300 noisy samples: the more the model *can* memorize, the worse it does out of sample.
+- **Every single model still loses money — 0 of 14 are profitable.** The "best" ones only lose *less* than always-trading, by sitting out days in an already-losing stretch. None turns the period positive.
+- **The winner's entire edge is one skipped day.** `logistic C=.03` — the *most heavily regularized* model — traded **193 of 194 days**. The single day it sat out lost **−₹4,695**, which is exactly its "+₹4,695 vs base". Against the correct null (drawing the same 193 days at random from the test region) that lands at **p ≈ 0.02**, but with **K=14 configs the Bonferroni bar is p < 0.0036**, so it does not clear it. One lucky skip out of 194 is a coin flip that came up heads, not a strategy. Its Deflated Sharpe is **0.316** (needs > 0.95) on an observed daily Sharpe of **−0.005**.
+- **Capacity actively hurts.** Gradient boosting is the **worst model tested** (−₹20,526; **p = 0.98**, i.e. worse than 98% of random day-selection), and the tree/kernel models cluster at the bottom. That is the textbook signature of overfitting ~300 noisy samples: the more the model *can* memorize, the worse it does out of sample.
 
-**Verdict: no model beats always-trade and clears the Bonferroni permutation bar. Not one of 14.**
+**Verdict: no model is profitable, and none beats always-trade while clearing the multiple-testing bar. Not one of 14.**
+
+### A correction, and the trap that caused it
+
+The first version of this study reported the winner's permutation p as **0.875** ("beaten by 87% of noise"). **That number was wrong**, and an adversarial review of the methodology caught it.
+
+The bug: the null shuffled labels across the **entire series** and re-ran the walk-forward. Because the early part of the sample is the profitable regime and the test window is the losing one, a global shuffle **imports early-regime P&L into the test-window null**, inflating what "noise" appears to earn and therefore inflating every p-value. Corrected — resampling only from the test-region days the model actually chose among — the winner's p moves from 0.875 to **≈0.02**, a 40-fold difference.
+
+The conclusion is unchanged (0/14 profitable, 0/14 clear the K=14 bar, DSR 0.316), but the *reason* it holds changed: not "the model is worse than noise", but "the model's one good decision does not survive having tried 14 models". The general lesson is worth keeping: **a permutation null must resample from the pool the model actually chose from.** Shuffling across a regime boundary silently tests a different, easier question — and in this project's history, a null that flatters the conclusion is exactly as dangerous as a positive result that flatters the strategy.
 
 ## Why the null is believable: the positive control
 

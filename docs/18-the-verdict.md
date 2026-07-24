@@ -24,7 +24,7 @@ This closes the strategy-research phase. It is the synthesis of docs/10–17: wh
 | Hedged strangle (protective wings) | 2% CAGR if truly capped; else not actually hedged | [docs/17](17-the-6L-50pct-question.md) |
 | Intraday-only strangle (never hold overnight) | in-sample 30% is **H1 regime luck** (H2 negative); a pure slippage bet | [docs/17 addendum](17-the-6L-50pct-question.md) |
 | Walk-forward regime filters to rescue intraday-only | **0/5** fix cold H2; best-in-H1 filter is **anti-predictive** in H2 (4th percentile) | this doc, below |
-| Machine learning (14 configs, walk-forward + permutation + Deflated Sharpe) | **0/14** beat always-trade; winner beaten by 87% of noise (p=0.875), DSR 0.316; gradient boosting **worst** | [docs/19](19-ml-has-no-edge.md) |
+| Machine learning (14 configs, walk-forward + permutation + Deflated Sharpe) | **0/14 profitable**; the winner's entire edge is 1 skipped day and fails the K=14 bar (p≈0.02 vs 0.0036 needed), DSR 0.316; gradient boosting **worst** | [docs/19](19-ml-has-no-edge.md) |
 | **NIFTY 200 momentum** | **the one edge** — ~15% CAGR, ~30% maxDD | [docs/14](14-momentum-the-one-real-edge.md) |
 
 ## Why options specifically cannot meet the mandate
