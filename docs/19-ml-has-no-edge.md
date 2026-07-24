@@ -56,7 +56,7 @@ An earlier version of this doc claimed "capacity actively hurts — gradient boo
 | ridge | a=50: −11,335 / a=10: −13,741 | **a=1: −5,547** | higher (least regularized) |
 | logistic | — | non-monotone (C=1 second best) | neither |
 
-And gboost d2's poor showing fails the *same* correction the winner fails (two-sided p × 14 = 0.477). The original wording applied multiple-testing control to reject the result it disliked while keeping the one it liked — a double standard. **The honest statement is: 13 of 14 marginal p-values sit between 0.41 and 0.98, and the ranking among configs is indistinguishable from noise.**
+And gboost d2's poor showing fails the *same* correction the winner fails (two-sided p × 14 ≈ 0.44–0.48 across independent Monte-Carlo runs — nowhere near significant either way). The original wording applied multiple-testing control to reject the result it disliked while keeping the one it liked — a double standard. **The honest statement is: 13 of 14 marginal p-values sit between 0.41 and 0.98, and the ranking among configs is indistinguishable from noise.**
 
 Relatedly, an earlier claim that "the models are demonstrably not degenerate — they choose between 84 and 194 trading days" was wrong. **194/194 (svm linear) *is* the degenerate always-trade classifier, and 8 of 14 configs trade ≥90% of days.** With a 64.4% OOS win rate, "trade" is the majority class, and accuracy-trained classifiers collapsing onto it is exactly the expected no-signal behaviour. Only the three ridge regressors (84/94/115 days) gate meaningfully — and all three lose money.
 
