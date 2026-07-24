@@ -20,11 +20,25 @@ ways so the null cannot be waved away:
    target with a deliberately injected signal. If it detects that and not the real
    thing, the real thing isn't there.
 
-The result (docs/19): no model beats simply trading every day once multiple testing is
-accounted for; the best is beaten by ~87% of pure noise; the Deflated Sharpe is far
-below significance; and the highest-capacity model (gradient boosting) is the WORST —
-the signature of overfitting 300-odd noisy samples. The positive control passes at
-p=0.000, so the harness is not blind.
+The result (docs/19): **no model beats simply trading every day once multiple testing is
+accounted for.** The winner's entire advantage is one skipped day (exact p = 4/194), and
+Romano-Wolf adjusted across the family it is ~0.22 — and that verdict is INVARIANT to the
+two free choices below. The ranking among configs is indistinguishable from noise; the
+Deflated Sharpe (0.316) merely restates that the winner has a negative Sharpe. The
+positive control passes, so the harness is not blind — but see `power_table`: the binding
+limitation is power, not model capacity.
+
+Two earlier claims are formally RETRACTED and must not be repeated: "the best is beaten
+by ~87% of noise" (an artifact of a global label-shuffle null; the corrected figure is
+~0.02 marginal) and "gradient boosting is the worst = overfitting" (refuted by
+within-family comparison, where higher capacity is often better).
+
+WHAT THE ABSOLUTE P&L DEPENDS ON: `build_dataset(slippage=...)` defaults to 0.50/leg,
+DOUBLE the 0.25 used elsewhere in the project, and INIT_FRAC sets where the test window
+starts. Whether the underlying strategy makes or loses money swings with both — docs/17
+already established it is a pure execution bet. Slippage is a constant per-day shift, so
+it cancels out of every studentized statistic here: the ML contribution is unaffected.
+Report the invariant claim (no model beats always-trade), not the cost-dependent one.
 
 Requires the optional research extra (numpy/scikit-learn/scipy), which is deliberately
 NOT a runtime dependency — the bot itself runs on the standard library:
@@ -192,16 +206,20 @@ def positive_control(X):
     if not (0 < k < len(pool)):
         return base, gated, float("nan")
     draws = np.array([rng.choice(pool, k, replace=False).sum() for _ in range(NDRAW)])
-    return base, gated, float(np.mean(draws >= gated))
+    return base, gated, float((np.sum(draws >= gated) + 1) / (NDRAW + 1))
 
 
 def _null_moments(pool, k):
-    """Exact finite-population mean/sd of a k-of-N sum drawn without replacement."""
+    """Exact finite-population mean/sd of a k-of-N sum drawn without replacement.
+
+    Var(S) = k * sigma_pop^2 * (N-k)/(N-1) with sigma_pop the DIVIDE-BY-N sd, so ddof=0
+    is the exact convention; ddof=1 overstates it by sqrt(N/(N-1)).
+    """
     import numpy as np
 
     N = len(pool)
     mu = k * pool.mean()
-    sd = pool.std(ddof=1) * np.sqrt(k * (N - k) / (N - 1))
+    sd = pool.std(ddof=0) * np.sqrt(k * (N - k) / (N - 1))
     return float(mu), float(sd)
 
 
@@ -239,10 +257,11 @@ def romano_wolf(pool, masks, observed, rng, ndraw=50000):
                     for (m, _), (k, mu, sd) in zip(stats, moments))
         if t_max >= t_obs:
             hits += 1
-    return hits / ndraw
+    # (hits+1)/(ndraw+1): a permutation p of exactly 0 is not an attainable value.
+    return (hits + 1) / (ndraw + 1)
 
 
-def power_table(pool, ks=(50, 100, 150, 193), alpha=0.05, bar=None):
+def power_table(pool, ks=(50, 100, 150, 170, 185, 190, 193), alpha=0.05, bar=None):
     """Minimum detectable improvement at 80% power, per gate size.
 
     The point the positive control cannot make: what size of REAL edge this sample
@@ -260,7 +279,9 @@ def power_table(pool, ks=(50, 100, 150, 193), alpha=0.05, bar=None):
         _, sd = _null_moments(pool, k)
         mde_a = (norm.ppf(1 - alpha) + z_pow) * sd
         mde_b = (norm.ppf(1 - bar) + z_pow) * sd if bar else float("nan")
-        out.append((k, sd, mde_a, mde_b))
+        # What a PERFECT gate of this size could actually win: skip the N-k worst days.
+        attainable = float(-np.sort(pool)[: len(pool) - k].sum())
+        out.append((k, sd, mde_a, mde_b, attainable))
     return out
 
 
@@ -292,7 +313,8 @@ def main(argv=None) -> int:
         if not (0 < k < len(pool)):
             return float("nan")
         draws = np.array([rng.choice(pool, k, replace=False).sum() for _ in range(NDRAW)])
-        return float(np.mean(draws >= gated))
+        # (hits+1)/(n+1): p=0 is not attainable from a finite permutation sample.
+        return float((np.sum(draws >= gated) + 1) / (NDRAW + 1))
 
     print(f"  {'model':<16} {'gated net':>11} {'trades':>9} {'daily SR':>9} {'vs base':>9} {'p':>8}")
     print("  " + "-" * 70)
@@ -325,10 +347,13 @@ def main(argv=None) -> int:
 
     # Romano-Wolf max-T across the whole family — the correction docs/16 uses, and the
     # one that is not defeated by the 1/N resolution floor above.
+    rw_rng = np.random.default_rng(SEED + 2)   # independent: RW must not depend on NDRAW
+    rw_family = sum(1 for t in results if 0 < t[2] < days)   # degenerate k=N is excluded
     rw = romano_wolf(pool, [t[7][tested0] for t in results],
-                     [t[1] for t in results], rng)
-    print(f"Romano-Wolf adjusted p (best of K={len(results)}, dependence-aware): {rw:.3f}"
-          f"  <- headline; Bonferroni {0.05/len(configs):.5f} is unreachable for a 1-skip model")
+                     [t[1] for t in results], rw_rng)
+    print(f"Romano-Wolf adjusted p (best of K={rw_family} non-degenerate configs, "
+          f"dependence-aware): {rw:.3f}  <- headline. Bonferroni is unreachable here: a "
+          f"1-skip model's p floor is 1/{days}={1/days:.5f} > {0.05/len(configs):.5f}.")
 
     r = ynet[best[7]].astype(float)
     if len(r) > 2 and r.std() > 0:
@@ -351,11 +376,15 @@ def main(argv=None) -> int:
           f" (proves integrity, NOT sensitivity at a small effect — see power below)")
 
     print(f"\nPOWER — minimum detectable improvement at 80% power (1 lot, {days} OOS days):")
-    print(f"  {'gate size k':>12} {'null sd':>10} {'MDE @a=.05':>12} {'MDE @Bonf':>12}")
-    for k, sd, mde_a, mde_b in power_table(pool, bar=0.05 / len(configs)):
-        print(f"  {str(k)+'/'+str(days):>12} {sd:>10,.0f} {mde_a:>12,.0f} {mde_b:>12,.0f}")
-    print("  A mandate-sized edge (~20-25%/yr, i.e. ~Rs 19k over this window) is BELOW")
-    print("  these thresholds: this sample cannot certify one even if it existed.")
+    print(f"  {'gate size k':>12} {'null sd':>10} {'MDE @a=.05':>12} {'oracle gain':>12} {'detectable?':>12}")
+    for k, sd, mde_a, mde_b, att in power_table(pool, bar=0.05 / len(configs)):
+        print(f"  {str(k)+'/'+str(days):>12} {sd:>10,.0f} {mde_a:>12,.0f} {att:>12,.0f} "
+              f"{'YES' if att > mde_a else 'no':>12}")
+    print("  MDE is the required excess over the k-conditional NULL MEAN, not over")
+    print("  always-trade. NOTE: for a gate that skips only a FEW days (high k) the MDE is")
+    print("  small and a tail-avoidance edge WOULD be detectable — the study looked there")
+    print("  and found nothing. It is mid-sized gates (k~50-150) this sample cannot")
+    print("  resolve. Normal approximation; the pool is skewed (-2.8), so treat as indicative.")
 
     # INIT_FRAC is a free parameter and the BENCHMARK is sensitive to it (the model's
     # own contribution is not). Disclosing it stops "an already-losing stretch" from
