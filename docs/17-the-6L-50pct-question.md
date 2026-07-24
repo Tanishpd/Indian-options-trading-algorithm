@@ -90,6 +90,45 @@ This is the mandate's defined-risk-only rule and drawdown cap, re-derived from s
 
 The 58/27/capped mirage passed a naive comparison and looked like the one genuinely promising thing options offered. It died only because the result was flagged as too-good and verified before being reported — the same discipline that caught the momentum index-fetch gap (docs/15) and the naked-strangle margin trap (docs/13). A backtest that beats the frontier is a bug until proven otherwise.
 
+## Addendum — "what if we don't take overnight positions at all?"
+
+The ruin tail in Finding 1 is an *overnight* gap: it opens between the close and the next open, when you cannot trade. So the natural question is whether going **intraday-only** — flat every night — removes it. It does. But it removes two things, not one, and the second is the edge.
+
+Going intraday-only (sell a 1% OTM strangle near the open on the nearest weekly, be flat by 15:25, or an intraday stop fires) **removes the overnight-gap ruin** — you are flat every night, and a stop *can* now act because there is a mark every minute — **but it also forgoes the overnight/weekend theta that is the actual edge, and pays entry+exit costs ~5× per week** instead of once per cycle. Built in [`intraday_only.py`](../src/optionsbot/research/intraday_only.py), each trading day is its own cycle, most-favourable window (earliest sane entry, latest exit), 4 lots, honest costs.
+
+In-sample on the full window it is the *best* thing options produced in this whole investigation — which is exactly why it has to be verified before it is believed:
+
+| Intraday-only, 1% OTM, 4 lots, 345 days | CAGR | maxDD | win | worst day |
+|---|---|---|---|---|
+| No stop (flat 15:25) | 30.8% | 19% | 70% | −₹73,511 |
+| Stop 2× credit | 33.5% | 17% | 65% | −₹65,165 |
+| Stop 1.5× credit | 21.6% | 21% | 60% | −₹37,916 |
+
+The ruin tail is genuinely gone (worst day −₹18k/lot, bounded — not −123%), and the stop *earns its keep* here, unlike against a gap. But two tests kill the return:
+
+**1. It is a pure execution bet.** The per-day edge is thin (~₹3/share net) and paid ~345×/year, so it lives or dies on the fill assumption:
+
+| slippage / leg | CAGR | maxDD |
+|---|---|---|
+| ₹0.25 (5 ticks) | 30.8% | 19% |
+| ₹0.50 (10 ticks) | 20.5% | 20% |
+| ₹0.75 (15 ticks) | 9.8% | 24% |
+| ₹1.00 (20 ticks) | −1.3% | 35% |
+| ₹1.50 (30 ticks) | −25.2% | 61% |
+
+Breakeven is ~₹1.00/leg; it clears the 20–25% target only inside ₹0.25–0.50/leg. There is no market-structure moat — you are paid for good execution, nothing more.
+
+**2. It is entirely one regime.** Split the window in half and the edge is not there in the second:
+
+| Half (no stop) | slip ₹0.25 | slip ₹0.50 |
+|---|---|---|
+| H1 (2024-11 → 2025-07) | +74.3% | +61.8% |
+| H2 (2025-07 → 2026-03) | **−3.1%** | **−14.7%** |
+
+The full-window 30.8% is the average of a spectacular H1 and a **losing H2** — the most recent eight months lost money. Out-of-sample there is no edge. The per-day shape is textbook short-premium: median +₹460/lot, a fatter left tail (min −₹18,378 vs max +₹11,058), 11 of 343 days worse than −₹5k/lot — and in H2 those hits cluster enough to erase the gains.
+
+**Verdict:** intraday-only converts *ruin risk* into *no durable edge + an execution bet* — not into free return. It is the same frontier reached from a new direction. And even at its in-sample best the ~18% drawdown already exceeds the mandate's 5–10% cap. This is the result that would have snared us if the full-window 30.8% had been reported without the out-of-sample split — the identical discipline that killed the condor above and the momentum overlays (docs/15–16). A single-window backtest that clears the target is a hypothesis, not a finding.
+
 ## Reproduce
 
 ```bash
@@ -99,6 +138,10 @@ python -m optionsbot.research.run_strangle data/intraday/NIFTY
 # The clean apples-to-apples hedge test (same position, wings the only variable)
 # lives in the research scripts; StrangleParams.wing_points drives it.
 python -m pytest tests/test_short_strangle.py -q
+
+# Intraday-only (never hold overnight): base table + slippage sweep + OOS split
+python -m optionsbot.research.intraday_only data/intraday/NIFTY
+python -m pytest tests/test_intraday_only.py -q
 ```
 
 Data is the same local intraday NIFTY chains as docs/10–11 (not git-tracked). No result here is a recommendation to sell naked options; it is a measurement of the strategy the mandate forbids, so the cost of removing the cap is explicit and permanent.
