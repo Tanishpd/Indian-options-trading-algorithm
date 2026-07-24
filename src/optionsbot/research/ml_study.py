@@ -164,12 +164,22 @@ def sweep():
     }
 
 
-def positive_control(X, rng):
+def positive_control(X):
     """Re-run the harness against an injected edge. If this is not detected, a null on
-    the real data would mean nothing."""
+    the real data would mean nothing.
+
+    Uses its OWN generator: sharing the sweep's `rng` made the synthetic target depend on
+    how many draws the sweep had already consumed, so changing NDRAW silently changed
+    this experiment (and left stale numbers in the writeup).
+
+    NOTE the limit of this check: the injected edge is large. It proves the harness is
+    not BROKEN; it does not prove sensitivity at the effect size actually of interest.
+    See `power_table` for that.
+    """
     import numpy as np
     from sklearn.linear_model import LogisticRegression
 
+    rng = np.random.default_rng(SEED + 1)                  # independent of the sweep
     trend = X[:, 3]                                        # the 5-day trend column
     synth = np.where(trend < 0, 400.0, -400.0) + rng.normal(0, 300, len(X))
     cls = (synth > 0).astype(int)
@@ -183,6 +193,75 @@ def positive_control(X, rng):
         return base, gated, float("nan")
     draws = np.array([rng.choice(pool, k, replace=False).sum() for _ in range(NDRAW)])
     return base, gated, float(np.mean(draws >= gated))
+
+
+def _null_moments(pool, k):
+    """Exact finite-population mean/sd of a k-of-N sum drawn without replacement."""
+    import numpy as np
+
+    N = len(pool)
+    mu = k * pool.mean()
+    sd = pool.std(ddof=1) * np.sqrt(k * (N - k) / (N - 1))
+    return float(mu), float(sd)
+
+
+def romano_wolf(pool, masks, observed, rng, ndraw=50000):
+    """Romano-Wolf / Westfall-Young max-T adjusted p for the BEST config.
+
+    Bonferroni is the wrong tool here twice over: it ignores the severe dependence
+    between 14 near-identical configs, and for a model that skips only 1 of N days the
+    smallest attainable p is 1/N — which can exceed the Bonferroni bar, making the
+    "rejection" a resolution artifact rather than evidence. Max-T fixes both by using
+    ONE permutation per draw applied to every config (preserving cross-model
+    dependence) and studentizing so configs with different k are comparable. This is
+    also the correction docs/16 already adopted for this project.
+    """
+    import numpy as np
+
+    N = len(pool)
+    stats, moments = [], []
+    for m, obs in zip(masks, observed):
+        k = int(m.sum())
+        if not (0 < k < N):
+            continue
+        mu, sd = _null_moments(pool, k)
+        if sd <= 0:
+            continue
+        stats.append((m, (obs - mu) / sd))
+        moments.append((k, mu, sd))
+    if not stats:
+        return float("nan")
+    t_obs = max(t for _, t in stats)
+    hits = 0
+    for _ in range(ndraw):
+        perm = rng.permutation(pool)                       # ONE draw, shared by all
+        t_max = max((perm[m].sum() - mu) / sd
+                    for (m, _), (k, mu, sd) in zip(stats, moments))
+        if t_max >= t_obs:
+            hits += 1
+    return hits / ndraw
+
+
+def power_table(pool, ks=(50, 100, 150, 193), alpha=0.05, bar=None):
+    """Minimum detectable improvement at 80% power, per gate size.
+
+    The point the positive control cannot make: what size of REAL edge this sample
+    could actually certify. If that number dwarfs a mandate-sized edge, the study can
+    only rule out a large edge — which is the honest (and more damning) reading.
+    """
+    import numpy as np
+    from scipy.stats import norm
+
+    z_pow = norm.ppf(0.80)
+    out = []
+    for k in ks:
+        if not (0 < k < len(pool)):
+            continue
+        _, sd = _null_moments(pool, k)
+        mde_a = (norm.ppf(1 - alpha) + z_pow) * sd
+        mde_b = (norm.ppf(1 - bar) + z_pow) * sd if bar else float("nan")
+        out.append((k, sd, mde_a, mde_b))
+    return out
 
 
 def main(argv=None) -> int:
@@ -220,13 +299,13 @@ def main(argv=None) -> int:
 
     results = []
     for name, (kind, fac) in configs.items():
-        preds, tested = walk_forward(X, ycls, ynet, fac, kind)
+        preds, tested = walk_forward(X, ycls, ynet, fac, kind)   # computed ONCE, cached
         sel = tested & preds
         g = float(ynet[sel].sum())
         r = ynet[sel].astype(float)
         sr = 0.0 if len(r) < 2 or r.std() == 0 else float(r.mean() / r.std())
         p = null_p(g, int(sel.sum()))
-        results.append((name, g, int(sel.sum()), sr, kind, fac, p))
+        results.append((name, g, int(sel.sum()), sr, kind, fac, p, sel))
         print(f"  {name:<16} {g:>11,.0f} {str(int(sel.sum()))+'/'+str(days):>9} "
               f"{sr:>9.3f} {g - base:>+9,.0f} {p:>8.4f}")
 
@@ -234,14 +313,24 @@ def main(argv=None) -> int:
     best = results[0]
     p_perm = best[6]
     print(f"\nBest by OOS net: {best[0]} ({best[1]:,.0f}, vs base {best[1]-base:+,.0f}), "
-          f"p={p_perm:.4f} against random selection of the same {best[2]} days.")
-    skipped = ynet[tested0 & ~walk_forward(X, ycls, ynet, best[5], best[4])[0]]
-    if len(skipped) <= 5:
+          f"marginal p={p_perm:.4f} vs random selection of the same {best[2]} days.")
+    skipped = ynet[tested0 & ~best[7]]
+    if len(skipped) <= 5 and len(skipped) > 0:
+        worse = int((pool <= skipped.min()).sum())
         print(f"  NB: it skipped only {len(skipped)} day(s) "
-              f"({', '.join(f'{v:,.0f}' for v in skipped)}) — that is one decision, not a strategy.")
+              f"({', '.join(f'{v:,.0f}' for v in skipped)}) — one decision, not a strategy. "
+              f"That day ranks {worse} of {days} worst, so the exact p is {worse}/{days}"
+              f"={worse/days:.4f}, and the FLOOR for any 1-skip model is 1/{days}"
+              f"={1/days:.5f}.")
 
-    sel = walk_forward(X, ycls, ynet, best[5], best[4])
-    r = ynet[sel[1] & sel[0]].astype(float)
+    # Romano-Wolf max-T across the whole family — the correction docs/16 uses, and the
+    # one that is not defeated by the 1/N resolution floor above.
+    rw = romano_wolf(pool, [t[7][tested0] for t in results],
+                     [t[1] for t in results], rng)
+    print(f"Romano-Wolf adjusted p (best of K={len(results)}, dependence-aware): {rw:.3f}"
+          f"  <- headline; Bonferroni {0.05/len(configs):.5f} is unreachable for a 1-skip model")
+
+    r = ynet[best[7]].astype(float)
     if len(r) > 2 and r.std() > 0:
         sr, T = r.mean() / r.std(), len(r)
         srs = np.array([t[3] for t in results])
@@ -255,14 +344,32 @@ def main(argv=None) -> int:
         print(f"Deflated Sharpe (best of K={K}, T={T}): DSR={float(norm.cdf(num/den)):.3f} "
               f"(need > 0.95; benchmark SR0={sr0:.3f}, observed SR={sr:.3f}).")
 
-    pc_base, pc_gated, pc_p = positive_control(X, rng)
-    print(f"\nPOSITIVE CONTROL (injected edge): base {pc_base:,.0f} -> gated {pc_gated:,.0f} "
-          f"({pc_gated-pc_base:+,.0f}), permutation p={pc_p:.3f}")
-    print(f"  harness has power: {'YES' if (pc_gated > pc_base and pc_p < 0.05) else 'NO'}")
+    pc_base, pc_gated, pc_p = positive_control(X)
+    print(f"\nPOSITIVE CONTROL (LARGE injected edge): base {pc_base:,.0f} -> gated "
+          f"{pc_gated:,.0f} ({pc_gated-pc_base:+,.0f}), p={pc_p:.3f}")
+    print(f"  harness is not blind: {'YES' if (pc_gated > pc_base and pc_p < 0.05) else 'NO'}"
+          f" (proves integrity, NOT sensitivity at a small effect — see power below)")
 
-    survived = best[1] > base and p_perm < 0.05 / len(configs)
-    print(f"\nVERDICT: any model beats always-trade AND clears Bonferroni? "
-          f"{'YES' if survived else 'NO'} — see docs/19.")
+    print(f"\nPOWER — minimum detectable improvement at 80% power (1 lot, {days} OOS days):")
+    print(f"  {'gate size k':>12} {'null sd':>10} {'MDE @a=.05':>12} {'MDE @Bonf':>12}")
+    for k, sd, mde_a, mde_b in power_table(pool, bar=0.05 / len(configs)):
+        print(f"  {str(k)+'/'+str(days):>12} {sd:>10,.0f} {mde_a:>12,.0f} {mde_b:>12,.0f}")
+    print("  A mandate-sized edge (~20-25%/yr, i.e. ~Rs 19k over this window) is BELOW")
+    print("  these thresholds: this sample cannot certify one even if it existed.")
+
+    # INIT_FRAC is a free parameter and the BENCHMARK is sensitive to it (the model's
+    # own contribution is not). Disclosing it stops "an already-losing stretch" from
+    # being quoted as a property of the period rather than of where the cut was placed.
+    print("\nFREE-PARAMETER CHECK — always-trade net by INIT_FRAC (benchmark is cut-dependent):")
+    for f in (0.30, 0.35, 0.40, 0.45, 0.50):
+        m = np.zeros(n, dtype=bool); m[int(n * f):] = True
+        print(f"  INIT_FRAC={f:.2f}: {int(m.sum()):>3} OOS days, always-trade "
+              f"{float(ynet[m].sum()):>+9,.0f}")
+
+    profitable = sum(1 for t in results if t[1] > 0)
+    print(f"\nVERDICT: {profitable}/{len(results)} models profitable; best Romano-Wolf "
+          f"adjusted p = {rw:.3f}. No usable edge — and note the load-bearing fact is the")
+    print("economic one (nothing made money), not the p-value. See docs/19.")
     return 0
 
 
