@@ -120,6 +120,12 @@ def main() -> None:
                          "Shadows place no real orders and each keeps its own book, "
                          "so one session yields an independent forward record per "
                          "strategy. Read them with optionsbot.research.forward_report.")
+    ap.add_argument("--evaluate-naked", metavar="NAME", action="append", default=None,
+                    help="EXPERIMENTAL: run a NAKED strategy in shadow, bypassing the "
+                         "defined-risk and per-trade-cap checks for THAT shadow only. "
+                         "Still places no real orders and cannot touch the live "
+                         "strategy or its kill-switch. For measuring un-deployable "
+                         "strategies forward (e.g. the intraday-strangle, docs/17).")
     ap.add_argument("--forward-root", default="data/forward",
                     help="where forward records are written (default data/forward)")
     ap.add_argument("--list-strategies", action="store_true",
@@ -183,19 +189,27 @@ def main() -> None:
         page=pager.send if pager else None,
     )
 
-    if args.evaluate:
+    naked_names = list(args.evaluate_naked or [])
+    eval_names = list(args.evaluate or []) + naked_names
+    if eval_names:
         from datetime import date as _date
 
         from .evaluator import Evaluator
 
-        specs = [(n, registry.build(n, cfg.risk)) for n in args.evaluate]
+        specs = [(n, registry.build(n, cfg.risk)) for n in eval_names]
         session.evaluator = Evaluator.build(
             specs, cash=cfg.starting_capital, costs=cfg.costs,
             per_trade_max_loss=cfg.risk.per_trade_max_loss_rupees,
             root=Path(args.forward_root), day=_date.today(),
+            allow_naked_names=frozenset(naked_names),
         )
-        print(f"shadow evaluation: {', '.join(args.evaluate)} "
-              f"-> {args.forward_root} (no real orders)")
+        if args.evaluate:
+            print(f"shadow evaluation: {', '.join(args.evaluate)} "
+                  f"-> {args.forward_root} (no real orders)")
+        if naked_names:
+            print(f"*** EXPERIMENTAL NAKED shadow(s): {', '.join(naked_names)} — "
+                  f"defined-risk/cap checks BYPASSED for these (shadow-only, no real "
+                  f"orders, live kill-switch untouched). Record is NOT gate evidence. ***")
 
     if args.once:
         session.feed.connect()

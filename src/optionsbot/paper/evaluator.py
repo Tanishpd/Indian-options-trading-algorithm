@@ -57,6 +57,13 @@ class Shadow:
     start_cash: float
     costs_paid: float = 0.0
     halted: str = ""                 # non-empty once this shadow is stopped
+    # EXPERIMENTAL escape hatch: when True this shadow bypasses the defined-risk
+    # and per-trade-cap invariants, so a NAKED strategy can be measured forward.
+    # It is safe ONLY because a shadow places no real orders and cannot touch the
+    # live strategy or its kill-switch — this flag never reaches the live loop's
+    # _validate_book. It must be opted in explicitly (--evaluate-naked) and is
+    # deliberately loud in the log. Never set it for the primary live strategy.
+    allow_naked: bool = False
     log: list[str] = field(default_factory=list)
 
     def equity(self, quotes) -> float:
@@ -88,11 +95,13 @@ class Evaluator:
     @classmethod
     def build(cls, specs: Sequence[tuple[str, PaperStrategy]], cash: float,
               costs: CostConfig, per_trade_max_loss: float,
-              root: Path, day: date) -> "Evaluator":
+              root: Path, day: date,
+              allow_naked_names: frozenset[str] = frozenset()) -> "Evaluator":
         shadows = [
             Shadow(name=name, strategy=strat,
                    broker=_ready_broker(cash, costs, day),
-                   journal=Journal(root, name, day), start_cash=cash)
+                   journal=Journal(root, name, day), start_cash=cash,
+                   allow_naked=name in allow_naked_names)
             for name, strat in specs
         ]
         return cls(shadows=shadows, costs=costs,
@@ -165,7 +174,18 @@ class Evaluator:
 
         A shadow allowed to do what the real engine would refuse is not
         evaluating the strategy — it is evaluating one that could never be run.
+
+        The one deliberate exception is an EXPERIMENTAL naked shadow (opted in via
+        --evaluate-naked): it bypasses both invariants so an un-deployable strategy
+        can still be measured forward. This never touches the live loop — a shadow
+        places no real orders — but it is recorded loudly so the record can never be
+        mistaken for a mandate-compliant one.
         """
+        if sh.allow_naked:
+            if "naked-eval" not in sh.log:
+                sh.log.append("naked-eval")   # once: this shadow runs unconstrained
+            return True
+
         legs = [
             BookLeg(index=p.leg.index, expiry=p.leg.expiry, strike=p.leg.strike,
                     right=p.leg.right, signed_shares=p.net, entry_price=p.entry_price)
