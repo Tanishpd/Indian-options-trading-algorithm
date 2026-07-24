@@ -4,8 +4,10 @@
 
 Two things are true at once, and both matter:
 
-1. **Nothing worked.** 0 of 14 model configurations is profitable out-of-sample, and the best one's entire advantage is a single skipped day that does not survive multiple-testing control.
-2. **This dataset could not have certified a usable edge even if one existed.** The minimum detectable improvement here is ~₹31k–37k over 194 days for a model that genuinely gates; a strategy hitting the project's own 20–25%/yr mandate (~₹19k over this window) would be statistically invisible. **That** — not the losing backtests — is the durable reason not to deploy ML on this problem.
+1. **No model beats simply trading every day — at any cost assumption tested.** Romano-Wolf adjusted p for the best-of-family is **0.32 / 0.21 / 0.21** at ₹0.25 / ₹0.50 / ₹0.75 per leg of slippage. This is the invariant result and the one to quote. The best model's entire advantage is a single skipped day.
+2. **For a model that genuinely gates, this dataset could not certify a mandate-sized edge anyway.** The minimum detectable improvement for a mid-sized gate (trading 50–150 of the 194 days) is ~₹31k–37k. (For a gate skipping only a *handful* of days the MDE is much smaller and such an edge *would* be visible — the study looked there and found nothing.)
+
+> **What is NOT a robust fact:** an earlier version of this doc led with *"every model loses money; 0 of 14 is profitable — a direct observation, and the load-bearing fact."* It is not a direct observation; it is a property of an undisclosed slippage assumption. See the sensitivity table below.
 
 ## What was run
 
@@ -35,7 +37,24 @@ Two things are true at once, and both matter:
 | ridge a=10 | −13,741 | 94/194 | −0.066 | −7,105 | 0.755 |
 | gboost d2 | −20,526 | 179/194 | −0.055 | −13,890 | 0.984 |
 
-**Every model loses money. 0 of 14 is profitable.** This is a direct observation, not an inference, and it is the load-bearing fact in this document.
+At this cost assumption every model loses money. **But that is a fact about the strategy's execution costs, not about ML** — and it is not robust:
+
+### The cost assumption, disclosed (this is a free parameter)
+
+`build_dataset` uses **₹0.50/leg** of slippage — *double* the ₹0.25 default the rest of the project uses (`intraday_only.py`). docs/19 previously never stated this. Re-running the entire sweep at three cost levels:
+
+| slippage | always-trade base | profitable configs | best model | **Romano-Wolf p** |
+|---|---|---|---|---|
+| ₹0.25/leg (project default) | **+7,334** | **13 of 14** | gboost d2 (+16,508) | **0.320** |
+| ₹0.50/leg (used here) | −6,636 | 0 of 14 | logistic C=.03 | **0.213** |
+| ₹0.75/leg | −20,606 | 0 of 14 | gboost d3 | **0.207** |
+
+Two conclusions, and only one of them is about ML:
+
+- **Whether the underlying strategy makes money is a pure execution bet** — it flips sign between ₹0.25 and ₹0.50 per leg. That is docs/17's finding restated, not a new one, and it is why the live paper shadow (which measures *real* fills) is the only thing that can settle it.
+- **The ML contribution is nil at every cost level.** Romano-Wolf stays 0.21–0.32 throughout: no model beats always-trade whether the strategy is winning or losing. **Slippage is a constant per-day shift, so it cancels out of every studentized statistic** — which is exactly why this is the invariant claim and the one the document leads with.
+
+Note also that at ₹0.25/leg the *best* config is `gboost d2` (+16,508) — the very model an earlier version of this doc called "the worst, a textbook signature of overfitting." The ranking is noise, and it reshuffles with an assumption that has nothing to do with model capacity.
 
 ### The winner is one coin flip
 
@@ -47,7 +66,7 @@ Two things are true at once, and both matter:
 
 ### The model *ranking* is noise — including the part that flattered my priors
 
-An earlier version of this doc claimed "capacity actively hurts — gradient boosting worst — the textbook signature of overfitting." **An adversarial review refuted that using this study's own data, and it was right.** In the only controlled comparison available — *within* a model family — higher capacity is **better in 3 of 5 families**:
+An earlier version of this doc claimed "capacity actively hurts — gradient boosting worst — the textbook signature of overfitting." **An adversarial review refuted that using this study's own data, and it was right.** In the only controlled comparison available — *within* a model family — higher capacity is **better in 3 of the 4 families** that permit the comparison:
 
 | family | lower capacity | higher capacity | winner |
 |---|---|---|---|
@@ -68,7 +87,7 @@ The adversarial audit swept the two arbitrary walk-forward knobs (`INIT_FRAC` 0.
 
 ## The part that actually settles it: power
 
-A positive control confirms the harness is not *broken*: injecting a large synthetic edge, it is found immediately — base ₹293 → gated **₹30,067 (+₹29,774), p = 0.000**. But that injected effect is a per-day Sharpe of ~0.8, roughly an order of magnitude larger than a mandate-sized edge. **It proves integrity, not sensitivity.**
+A positive control confirms the harness is not *broken*: injecting a large synthetic edge, it is found immediately — base ₹293 → gated **₹30,067 (+₹29,774), p < 1/20,001**. But that injected effect is a per-day Sharpe of ~0.8, roughly an order of magnitude larger than a mandate-sized edge. **It proves integrity, not sensitivity.**
 
 The real question is what size of edge this sample could certify. Under the correct k-conditional null:
 
@@ -79,9 +98,9 @@ The real question is what size of edge this sample could certify. Under the corr
 | 150/194 | 12,416 | **+30,873** | +43,851 |
 | 193/194 | 2,123 | +5,279 | +7,499 |
 
-A model that genuinely gates (trading 50–150 of the 194 days) needs **+₹31,000–37,000** to register at α=.05, or **+₹44,000–52,000** to clear a family-wise bar — that is **31–52% of a ₹1L account over roughly nine months**. A strategy delivering exactly the project's 20–25%/yr mandate (~₹19,000 over this window) reaches only z ≈ 1.3, p ≈ 0.1: **it would not have been detected here.**
+A model that genuinely gates (trading 50–150 of the 194 days) needs **+₹31,000–37,000** to register at α=.05 — note this is the required excess over the k-conditional *null mean*, not over always-trade, and it is a normal approximation to a skewed pool (skew −2.80), so treat it as indicative, or **+₹44,000–52,000** to clear a family-wise bar — that is **31–52% of a ₹1L account over roughly nine months**. A strategy delivering exactly the project's 20–25%/yr mandate (~₹19,000 over this window) reaches only z ≈ 1.3, p ≈ 0.1: **it would not have been detected here.**
 
-> **Required caveat.** This study demonstrates the absence of a *detectable* edge, not the absence of an edge. Because ~300 samples and 194 OOS days cannot certify a mandate-sized edge even when one exists, **no ML result on this dataset is verifiable in either direction.** That is a stronger and more durable reason not to deploy ML here than any of the losing backtests above.
+> **Required caveat.** This study demonstrates the absence of a *detectable* edge, not the absence of an edge. Because ~300 samples and 194 OOS days cannot certify a mandate-sized edge even when one exists, **no mid-sized-gate ML result on this dataset is verifiable in either direction.** (A gate skipping only a few days is the one alternative this sample *can* resolve — and the study looked there: the winner's single skip is the 4th-worst day, exact p = 4/194.) That is a stronger and more durable reason not to deploy ML here than any of the losing backtests above.
 
 Note also that the Deflated Sharpe (0.316) is **not** independent corroboration: once the best model has a negative Sharpe (−0.005), DSR < 0.5 follows arithmetically. It restates "nothing was profitable" rather than adding evidence.
 
@@ -94,8 +113,8 @@ Note also that the Deflated Sharpe (0.316) is **not** independent corroboration:
 
 ## What this means
 
-- **Do not propose ML for this problem again**, and do not reach for a bigger model — not because "big models overfit" (this study does not show that), but because **the dataset cannot validate any edge of usable size**, so no result it produces can be trusted in either direction.
-- **Scope of what was actually ruled out:** accuracy-trained classifiers and unweighted ridge, on 13 daily features, with 129–318 training rows. A P&L-weighted objective (`class_weight`/`sample_weight` ∝ |net|) was **not** tested — worth recording as untested, though the power ceiling above applies to it equally.
+- **Do not propose ML for this problem again**, and do not reach for a bigger model — not because "big models overfit" (this study does not show that), but because **the dataset cannot validate a mid-sized-gate edge of usable size**, so no result it produces can be trusted in either direction.
+- **Scope of what was actually ruled out:** accuracy-trained classifiers and unweighted ridge, on 13 daily features, with 129→319 training rows over 39 refits. A P&L-weighted objective (`class_weight`/`sample_weight` ∝ |net|) was **not** tested — worth recording as untested, though the power ceiling above applies to it equally.
 - If ML is ever revisited it must clear this bar: walk-forward OOS, a within-region null, a dependence-aware correction (Romano-Wolf), a positive control, **and a stated minimum detectable effect**. Anything less produces a curve-fit.
 - The conclusion of [docs/18](18-the-verdict.md) is unchanged: the one real edge is NIFTY 200 momentum, and it is not an options strategy.
 
