@@ -298,3 +298,43 @@ def test_bound_is_tested_on_the_market_price_not_the_modelled_one():
     exitm = minute(at(16, 10, 6), 8.0, 2.0, 6.0, 3.0)
     trade, _ = run_expiry(rich + later + exitm, EXPIRY, LOT, SLIP, ZERO, RISK)
     assert trade.entered_at == at(16, 10, 5)          # skipped the bad print
+
+
+# -- trailing profit-lock (docs/11 addendum) ------------------------------
+
+# target off (frac=1.0 -> threshold 0, unreachable) to isolate the trail.
+TRAIL = IntradayParams(offset_pct=0.008, wing_points=50.0, slippage_per_leg=0.0,
+                       profit_target_frac=1.0, stop_loss_frac=0.6, trail_stop_frac=0.5)
+
+
+def test_trailing_stop_locks_profit_on_retracement_hand_computed():
+    """Credit 20. Profit peaks at 15 (cost-to-close 5), then gives back: at a
+    give-back of 50% the exit fires when profit drops to 7.5, i.e. cost-to-close
+    reaches 12.5. It must hold at the 10:02 peak and at 10:03 (profit 8 > 7.5),
+    and exit at 10:04 (profit 7 <= 7.5)."""
+    bars = (ENTRY
+            + minute(at(16, 10, 1), 20.0, 15.0, 12.0, 7.0)    # value 10, profit 10
+            + minute(at(16, 10, 2), 18.0, 15.0, 10.0, 8.0)    # value 5,  peak profit 15
+            + minute(at(16, 10, 3), 22.0, 15.0, 12.0, 7.0)    # value 12, profit 8  -> hold
+            + minute(at(16, 10, 4), 23.0, 15.0, 12.0, 7.0))   # value 13, profit 7  -> trail
+    trade, _ = run_expiry(bars, EXPIRY, LOT, TRAIL, ZERO, RISK)
+    assert trade is not None and trade.exit_reason == "trail"
+    assert trade.exited_at == at(16, 10, 4)               # not the peak, not earlier
+    assert trade.exit_cost == pytest.approx(13.0)
+    assert trade.gross == pytest.approx((20 - 13) * LOT)  # 455 -- locked partial gain
+    assert trade.net < trade.gross                        # STT still charged on the close
+
+
+def test_trailing_stop_does_not_fire_without_a_profit_peak():
+    """A trailing lock guards winners, not losers. With the mark never below the
+    credit, peak profit is <= 0 so the trail never triggers; the hard stop is the
+    only loss guard. Here the temporary marks are losses (25, 30) that neither
+    trip the stop (38) nor the trail, and the cycle settles at expiry-intrinsic
+    (spot 25,000 -> all legs worthless -> the full 20 credit is kept)."""
+    bars = (ENTRY
+            + minute(at(16, 10, 1), 30.0, 15.0, 18.0, 8.0)    # value 25, a loss
+            + minute(at(16, 10, 2), 33.0, 15.0, 20.0, 8.0))   # value 30, worse, stop 38 unhit
+    trade, _ = run_expiry(bars, EXPIRY, LOT, TRAIL, ZERO, RISK)
+    assert trade is not None and trade.exit_reason == "settled"
+    assert trade.exit_reason != "trail"
+    assert trade.gross == pytest.approx(20 * LOT)         # 1300, full profit held to settle
