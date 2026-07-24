@@ -75,3 +75,13 @@ def _collect_only(risk: RiskConfig, **kw):
     from ..paper.loop import CollectOnly
 
     return CollectOnly()
+
+
+@register("intraday-strangle",
+          "EXPERIMENTAL naked intraday short strangle (no overnight, 1% OTM, flat by "
+          "15:25). NOT mandate-compliant — naked. Shadow-only via --evaluate-naked; "
+          "the backtest says regime luck / no durable edge (docs/17/18).")
+def _intraday_strangle(risk: RiskConfig, **kw):
+    from .intraday_strangle import IntradayStrangle, StrangleParams
+
+    return IntradayStrangle(params=StrangleParams(**kw), risk=risk)
