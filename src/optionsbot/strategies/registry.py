@@ -77,6 +77,17 @@ def _collect_only(risk: RiskConfig, **kw):
     return CollectOnly()
 
 
+@register("ml-intraday-strangle",
+          "EXPERIMENTAL ML-GATED naked intraday strangle: a frozen logistic gate decides "
+          "whether to trade each day. NOT mandate-compliant — naked. Shadow-only via "
+          "--evaluate-naked; run it BESIDE intraday-strangle so the difference between "
+          "the two forward records is the ML contribution (docs/19).")
+def _ml_intraday_strangle(risk: RiskConfig, **kw):
+    from .ml_gated_strangle import MlGatedStrangle, MlGateParams
+
+    return MlGatedStrangle(params=MlGateParams(**kw), risk=risk)
+
+
 @register("intraday-strangle",
           "EXPERIMENTAL naked intraday short strangle (no overnight, 1% OTM, flat by "
           "15:25). NOT mandate-compliant — naked. Shadow-only via --evaluate-naked; "
