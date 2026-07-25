@@ -64,6 +64,14 @@ class IntradayStrangle:
     def from_state(self, state: dict) -> None:
         self.phase = state.get("phase", "idle")
 
+    def _say(self, msg: str) -> None:
+        """Record a decision for the journal/journalctl (#6), deduping consecutive
+        repeats so a held position does not log the same line every tick."""
+        if not self.log or self.log[-1] != msg:
+            self.log.append(msg)
+            if len(self.log) > 200:
+                del self.log[: len(self.log) - 200]
+
     # -- helpers --
 
     def _order(self, ctx, strike: float, right: Right, side: Side) -> Order | None:
@@ -85,6 +93,7 @@ class IntradayStrangle:
             # Square off the whole book at/after the deadline; otherwise hold. There
             # is no stop and no target: the strategy under test is hold-to-squareoff.
             if now_t >= self.params.squareoff:
+                self._say("square-off at deadline")
                 orders = [self._order(ctx, p.leg.strike, p.leg.right, p.leg.side.opposite)
                           for p in book]
                 return [o for o in orders if o is not None]
@@ -93,6 +102,7 @@ class IntradayStrangle:
         # Flat.
         if self.phase == "holding":
             self.phase = "done"          # square-off filled -> finished for the day
+            self._say("flat for the day")
         if self.phase == "done":
             return []
         if not (self.params.entry_after <= now_t <= self.params.entry_before):
@@ -104,6 +114,8 @@ class IntradayStrangle:
         call = self._order(ctx, sc, Right.CALL, Side.SELL)
         put = self._order(ctx, sp, Right.PUT, Side.SELL)
         if call is None or put is None:
+            self._say("entry skipped: both legs not quotable this minute")
             return []                    # can't quote both legs this tick; try next
         self.phase = "holding"
+        self._say(f"entered strangle {sc:.0f}C / {sp:.0f}P")
         return [call, put]

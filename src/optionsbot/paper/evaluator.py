@@ -210,6 +210,14 @@ class Evaluator:
 
     def _record(self, sh: Shadow, ctx: PaperContext, orders, fills,
                 note: str = "") -> None:
+        # A forward record that shows "no trade" without saying WHY is much weaker
+        # evidence months later than one that carries the reason (issue #6). Surface
+        # the strategy's own latest decision line into the journal when nothing more
+        # specific was passed in.
+        if not note:
+            slog = getattr(sh.strategy, "log", None)
+            if slog:
+                note = slog[-1]
         sh.journal.append(Entry(
             ts=ctx.now, strategy=sh.name, index=ctx.index, expiry=ctx.expiry,
             spot=ctx.spot, phase=getattr(sh.strategy, "phase", ""),

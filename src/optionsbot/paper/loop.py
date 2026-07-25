@@ -123,6 +123,7 @@ class PaperSession:
         self._last_marks: dict[LegKey, float] = {}
         self._flatten_attempts: dict[LegKey, int] = {}
         self._failures = 0
+        self._last_decision = ""
         self._restore()
 
     # -- time ---------------------------------------------------------------
@@ -147,6 +148,16 @@ class PaperSession:
         self.log(f"*** ALERT: {reason} ***")
         if self.page is not None:
             self.page(reason)
+
+    def _surface_decision(self, strategy: object) -> None:
+        """Emit the strategy's newest decision line to the session log so entry skips
+        and exit triggers are attributable from journalctl alone (issue #6). Strategies
+        dedupe consecutive repeats, so the last line is the newest distinct decision;
+        emit it only when it changes to avoid one stuck condition flooding the log."""
+        log = getattr(strategy, "log", None)
+        if log and log[-1] != self._last_decision:
+            self._last_decision = log[-1]
+            self.log(f"decision: {log[-1]}")
 
     def _persist(self) -> None:
         self.state_path.parent.mkdir(parents=True, exist_ok=True)
@@ -396,7 +407,9 @@ class PaperSession:
                 except Exception as exc:                      # noqa: BLE001
                     self.log(f"shadow evaluation failed (live unaffected): {exc!r}")
 
-            for order in self.strategy.decide(ctx):
+            decisions = list(self.strategy.decide(ctx))
+            self._surface_decision(self.strategy)   # attribute skips/exits in journalctl (#6)
+            for order in decisions:
                 changed = True
                 if not self._place(order, today, book_by_key):
                     break
