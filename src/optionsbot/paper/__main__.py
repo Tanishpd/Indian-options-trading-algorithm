@@ -58,7 +58,8 @@ def telegram_setup(secret_id: str, region: str | None) -> None:
         "alert channel is live — kill-switch trips, flatten failures, and feed "
         "death will page here"
     )
-    print(f"chat id {chat_id} stored in {secret_id}; test message "
+    # Do not print the chat id: it is derived from the secret and lands in logs.
+    print(f"chat id stored in {secret_id}; test message "
           f"{'delivered' if ok else 'FAILED — check the token'}")
 
 
@@ -150,7 +151,9 @@ def main() -> None:
         Path(args.secrets), aws_secret=args.aws_secret, aws_region=args.aws_region
     )
     if args.aws_secret:
-        print(f"credentials loaded from AWS Secrets Manager: {args.aws_secret}")
+        # Don't echo the secret identifier into logs (it is already in the process
+        # args); the operator knows which secret they passed.
+        print("credentials loaded from AWS Secrets Manager")
 
     feed = AngelOneFeed(
         api_key=creds["SMARTAPI_KEY"],
