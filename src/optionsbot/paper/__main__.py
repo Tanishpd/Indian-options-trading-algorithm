@@ -58,8 +58,9 @@ def telegram_setup(secret_id: str, region: str | None) -> None:
         "alert channel is live — kill-switch trips, flatten failures, and feed "
         "death will page here"
     )
-    # Do not print the chat id: it is derived from the secret and lands in logs.
-    print(f"chat id stored in {secret_id}; test message "
+    # Log neither the chat id (secret-derived) nor the secret id (a secret-adjacent
+    # identifier) — both land in journalctl/CloudWatch and both trip CodeQL.
+    print("chat id stored; test message "
           f"{'delivered' if ok else 'FAILED — check the token'}")
 
 
