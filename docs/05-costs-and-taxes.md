@@ -9,7 +9,8 @@
 | STT — option **sale** | **0.15% of premium** (from Apr 1, 2026) | Charged to the seller on premium, not notional. Use 0.10% for backtest dates before Apr 1, 2026. |
 | STT — futures sale | 0.05% (from Apr 1, 2026) | 0.02% before. |
 | Brokerage (discount broker) | ₹20/order → **~₹160 per iron condor round trip** | 4 legs × entry + exit. |
-| Weekly condor cadence | ~₹7,700/yr brokerage alone | ~7.7% of capital before STT, exchange charges, GST, stamp duty, slippage. |
+| Brokerage — **Upstox Plus** | ₹30/order → **~₹240 per condor round trip** | Upstox's expired-instruments API (the leading backtest data source, #13) requires the Plus tier, which raises per-order brokerage from ₹20 to ₹30 (no subscription fee). **Applies only if Upstox is chosen** (#17) — Zerodha/others stay at ₹20. A 50% jump on the largest single cost component: it would push the measured condor cost drag from ~₹211 toward ~₹290/round trip, ~15% of capital annually at weekly cadence. |
+| Weekly condor cadence | ~₹7,700/yr brokerage alone (₹20/order) → **~₹11,500/yr at ₹30/order** | ~7.7% → ~11.5% of capital before STT, exchange charges, GST, stamp duty, slippage. |
 | Worked STT example | Lot 65 × ₹50 premium → ₹3,250 × 0.15% = **₹4.88 per short leg** | Verified arithmetic. |
 
 ## Rules for the bot and backtester
