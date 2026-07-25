@@ -41,7 +41,11 @@ class TelegramAlerter:
             self._http(url, data)
             return True
         except Exception as exc:  # alerting must never crash the session
-            self._log(f"telegram send failed: {exc!r} — message was: {message}")
+            # A urllib error can carry the failing request URL — which embeds the bot
+            # token — into its repr. Redact the token before it reaches any log sink
+            # (journalctl / CloudWatch), so a send failure never leaks the credential.
+            detail = repr(exc).replace(self._token, "***") if self._token else repr(exc)
+            self._log(f"telegram send failed: {detail} — message was: {message}")
             return False
 
 
